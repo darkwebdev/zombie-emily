@@ -49,9 +49,16 @@ Feed → input/movement/throw → Emily tick → breadcrumb trail → aggro → 
 - **docs/TESTING.md** — the debug panel (`?debug=1`), its scripted demo scenarios, and the automated test suite that verifies real behavior against each one live. Read this before touching anything in `src/debug/`.
 - **docs/FIRST_BUILD.md** — the original M1 design spec. Historical: several items it lists as "deferred" (the RECOVERING grace window, the defenseless damage multiplier, enemy variants, follower fusion) have since been built. Still useful for the original core-loop framing and tuning rationale; not a current-state reference — `tuning.ts` and the code are the source of truth for what's actually implemented.
 - **docs/IDEAS.md** — unscoped backlog ideas, not yet designed or built. Pull one into an actual design pass (the `planner` subagent) before building it.
+- **Character progression** is currently under discussion in GitHub issues, not yet in a doc — see the epic, [#15](https://github.com/darkwebdev/zombie-emily/issues/15), for the map and phase order. Per the convention above, those issues close as their decisions land in `docs/`.
 
 ## Working conventions
 
 - Design decisions with real gameplay/balance implications go through the `planner` subagent (Opus-backed, defined in `.claude/agents/planner.md`) via the `/planner` skill. Straightforward engineering doesn't need it.
 - Never hardcode a balance number outside `tuning.ts`.
 - When adding or changing gameplay behavior, add or update the matching demo + test in `src/debug/` (docs/TESTING.md) rather than only hand-testing once and moving on.
+
+### Where design work lives: discussions in issues, decisions in docs
+
+- **Discussions go in GitHub issues, one topic per issue.** When a design pass produces a lot of material, split it into separate issues rather than leaving it in a chat log or piling it into one omnibus issue. A long single thread can't be scanned — one topic per issue means you can hold one thing at a time and come back to the rest independently. Cross-link related issues so the set stays navigable on its own.
+- **Finalized decisions go in documents** — the `docs/` tree, or this file. The issue holds the debate and the options; once a call is actually made, the outcome belongs in a doc so it's discoverable without reading issue history.
+- **An issue may be closed only after its decision is finalized in a doc, and that doc is referenced from CLAUDE.md or the other docs.** Shipping the code is not on its own grounds to close an issue — the decision has to be written down and linked where a reader will find it. Every issue should carry an explicit closing condition naming the document that has to exist first.
