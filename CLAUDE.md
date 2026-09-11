@@ -60,7 +60,18 @@ Feed → input/movement/throw → Emily tick → breadcrumb trail → aggro → 
 ### Where design work lives: discussions in issues, decisions in docs
 
 - **Discussions go in GitHub issues, one topic per issue.** When a design pass produces a lot of material, split it into separate issues rather than leaving it in a chat log or piling it into one omnibus issue. A long single thread can't be scanned — one topic per issue means you can hold one thing at a time and come back to the rest independently. Cross-link related issues so the set stays navigable on its own.
-- **Issues exist so a long design conversation doesn't have to be navigated as one hard-to-scroll chat thread. Comments are how feedback and follow-up questions get added to that conversation after the issue is opened.** When the user asks a question in an issue comment, answer it there — `gh issue comment <number> --body "..."` — not only in chat. Answering only in chat recreates the exact navigation problem issues exist to solve. Before doing any further work on an issue, check its comment thread for unanswered questions and answer them first.
+- **Issues exist so a long design conversation doesn't have to be navigated as one hard-to-scroll chat thread. Comments are how feedback and follow-up questions get added to that conversation after the issue is opened.** When the user asks a question in an issue comment, answer it there, not only in chat — see "Who's commenting" below for how. Answering only in chat recreates the exact navigation problem issues exist to solve. Before doing any further work on an issue, check its comment thread for unanswered questions and answer them first.
 - **Finalized decisions go in documents** — the `docs/` tree, or this file. The issue holds the debate and the options; once a call is actually made, the outcome belongs in a doc so it's discoverable without reading issue history.
 - **An issue may be closed only after its decision is finalized in a doc, and that doc is referenced from CLAUDE.md or the other docs.** Shipping the code is not on its own grounds to close an issue — the decision has to be written down and linked where a reader will find it. Every issue should carry an explicit closing condition naming the document that has to exist first.
+- **When the user approves an issue's decision (e.g. by commenting approval on it), write that decision into its doc via the `planner` subagent, then close the issue** — don't leave finalization for later or do the doc-writing directly in whatever model the session happens to be running. This is the same "design decisions go through planner" rule above, applied to the step that actually lands the decision permanently, since that write is exactly as consequential as the design work that produced it.
 - **Unscoped ideas start in `docs/IDEAS.md`.** When the backlog there needs clearing out, run `/triage-ideas` — it sends each idea through the `planner` subagent and turns the result into GitHub issues per the rules above. It's manual-trigger only; nothing runs it automatically.
+
+#### Who's commenting
+
+Both the user and the coding agent use the same GitHub account for `gh` commands in this repo, so a plain `gh issue comment` from the agent would be indistinguishable from the user's own words — which breaks the "comments outrank the issue body" rule, since there'd be no way to tell whose comment is whose. **Agent comments on issues go through the `.github/workflows/agent-comment.yml` workflow instead**, so they post as `github-actions[bot]` — a distinct account with its own badge in the GitHub UI — rather than as a text convention that's easy to forget or miss:
+
+```
+gh workflow run agent-comment.yml -f issue=<number> -f body="<markdown body>"
+```
+
+It's manual-trigger only (`workflow_dispatch`), never automatic. Confirm the comment landed with `gh api repos/<owner>/<repo>/issues/<number>/comments` after a few seconds, since `gh workflow run` doesn't return the comment itself.

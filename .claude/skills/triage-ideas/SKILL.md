@@ -21,9 +21,12 @@ ideas backlog", "process docs/IDEAS.md").
    long design conversation doesn't have to be navigated as one hard-to-scroll
    chat thread — an unanswered question sitting in a comment is a broken
    instance of that, not merely unprocessed feedback, whether or not it's
-   related to anything currently in `docs/IDEAS.md`. Post the answer with `gh
-   issue comment <number> --body "..."`, directly on that issue, not only in
-   the chat report at the end of this skill. If answering requires design
+   related to anything currently in `docs/IDEAS.md`. Post the answer via the
+   `agent-comment.yml` workflow (see "Who's commenting" in CLAUDE.md) —
+   `gh workflow run agent-comment.yml -f issue=<number> -f body="..."` — not
+   plain `gh issue comment`, so the reply is attributable to the agent rather
+   than indistinguishable from the user's own account, and not only in the
+   chat report at the end of this skill. If answering requires design
    judgment rather than a factual lookup, it's fine to route it through the
    `planner` subagent first (as in step 4) and post the subagent's answer —
    but post it.
