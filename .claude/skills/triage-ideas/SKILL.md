@@ -70,6 +70,20 @@ ideas backlog", "process docs/IDEAS.md").
    explicitly to flag what it's uncertain about and what collides with
    existing invariants, rather than only presenting a clean answer.
 
+   **Run these one at a time — never fan out a batch of planner agents in
+   parallel.** Wait for each to finish before launching the next. A batch of
+   five Opus subagents launched together once hit the account's session rate
+   limit and all died mid-work, leaving issues created but their mandatory
+   follow-up comments unposted — inconsistent half-written state across
+   GitHub that then had to be audited and repaired. Sequential is slower in
+   wall-clock terms but it actually completes. If a run does get interrupted,
+   audit GitHub (`gh issue list --state all`, plus per-issue comment checks)
+   before re-running anything, so a partially-completed pass isn't duplicated.
+
+   Also: don't spawn a subagent for work the main session can just do. A few
+   issue comments that need answering don't need a planner pass each — answer
+   them directly unless the design judgment genuinely warrants delegation.
+
 5. **Split the planner's output into GitHub issues, one topic per issue** —
    never one omnibus issue per original idea. Follow the shape already
    established by the character-progression epic
