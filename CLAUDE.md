@@ -77,6 +77,24 @@ Feed → input/movement/throw → Emily tick → breadcrumb trail → aggro → 
 - **When the user approves an issue's decision (e.g. by commenting approval on it), write that decision into its doc via the `planner` subagent, then close the issue** — don't leave finalization for later or do the doc-writing directly in whatever model the session happens to be running. This is the same "design decisions go through planner" rule above, applied to the step that actually lands the decision permanently, since that write is exactly as consequential as the design work that produced it.
 - **Unscoped ideas start in `docs/IDEAS.md`, filed via `/save-idea`.** When the user drops a new idea mid-conversation, use `/save-idea` rather than writing it up inline — it spawns a background subagent that cross-references existing issues and files the entry, so capturing an idea doesn't interrupt whatever's currently in progress. When the backlog there needs clearing out, run `/triage-ideas` — it sends each idea through the `planner` subagent and turns the result into GitHub issues per the rules above. Both are manual-trigger only; nothing runs either automatically.
 
+#### Every issue states its ask at the top
+
+Design issues in this repo are long, and a reader should never have to scan one to discover it wasn't asking them anything. **Every issue opens with a short block, before any exposition, marked `<!-- ask-block -->`, that says which of four things it wants** — and carries the matching label:
+
+| Block | Label | Means |
+| --- | --- | --- |
+| `## ❓ What I need from you` | `decision-needed` | A real fork only the user can settle. State the question in **one concrete sentence**, list 2–4 short options, and name a recommendation (or say explicitly that it's a taste call with none). |
+| `## ✅ Nothing to decide here` | `needs-approval` | Fully designed, no open forks. Say in one line what it's waiting on. |
+| `## 🎮 Nothing to decide — this one needs play` | `needs-playtest` | Settled; the remainder is tuning that needs the game running. Say what has to be observed. |
+| `## ⛔ Blocked` / `## 💤 Parked` / `## 📖 Reference` | `deferred` (or none) | Nothing to do. Name the blocker, or say it's an index/register. |
+
+Rules that make this worth having:
+
+- **`decision-needed` means only the first row.** It was previously on almost everything, including issues asking nothing, which made it useless as a filter. Don't re-broaden it.
+- **A question must never be buried.** If a design pass leaves an open fork, it goes in the top block — not in an "Open questions" heading two-thirds down. Tuning unknowns are *not* forks; they're `needs-playtest`.
+- **One fork shared by two issues gets its own issue**, and both point at it. [#29](https://github.com/darkwebdev/zombie-emily/issues/29) (the third-input-key question, shared by [#9](https://github.com/darkwebdev/zombie-emily/issues/9) and [#21](https://github.com/darkwebdev/zombie-emily/issues/21)) is the worked example. Never let the same decision be re-derived in two places.
+- **[#30](https://github.com/darkwebdev/zombie-emily/issues/30) is the decision queue** — a living index of every open issue bucketed this way, one line each. Keep it in sync as issues open, close, or change bucket; it's the page the user opens to find what's blocked on them.
+
 #### Who's commenting
 
 Both the user and the coding agent use the same GitHub account for `gh` commands in this repo, so a plain `gh issue comment` from the agent would be indistinguishable from the user's own words — which breaks the "comments outrank the issue body" rule, since there'd be no way to tell whose comment is whose. **Agent comments on issues go through the `.github/workflows/agent-comment.yml` workflow instead**, so they post as `github-actions[bot]` — a distinct account with its own badge in the GitHub UI — rather than as a text convention that's easy to forget or miss:
