@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { WORLD, EMILY, LIMB, HORDE_CAP, COMBAT, AGGRO, FUSION } from "../config/tuning";
+import { WORLD, EMILY, LIMB, COMBAT, AGGRO, FUSION, TRAIL_DEGENERATION_THRESHOLD } from "../config/tuning";
 import type { DemoName } from "../debug/demos";
 import type { EnemyKind, FollowerKind } from "../config/tuning";
 import { Emily } from "../entities/Emily";
@@ -273,6 +273,22 @@ export class GameScene extends Phaser.Scene {
       }
       clusterStart = i;
     }
+
+    // The horde is uncapped on purpose, but the breadcrumb trail can't
+    // address more samples than it stores: past this many followers the
+    // tail all targets the same oldest sample and piles up at one x.
+    // A diagnostic, not a cap — see TRAIL in tuning.ts.
+    if (this.followers.length >= TRAIL_DEGENERATION_THRESHOLD) {
+      this.debugLabels.push(
+        this.add
+          .text(4, 4, `TRAIL SATURATED ${this.followers.length}/${TRAIL_DEGENERATION_THRESHOLD}`, {
+            fontSize: "8px",
+            color: "#ff6666",
+          })
+          .setScrollFactor(0)
+          .setDepth(999),
+      );
+    }
   }
 
   private handleMovementAndThrow(dt: number): void {
@@ -449,20 +465,14 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** HORDE_CAP is a slot budget, not a headcount — see tuning.ts. */
-  private usedSlots(): number {
-    return this.followers.reduce((sum, f) => sum + f.stats.slotCost, 0);
-  }
-
-  /** Removes the soldier and, if the horde has slot room, spawns a base
-   * follower in its place (always 1 slot). Shared by the normal 1.0s
+  /** Removes the soldier and spawns a base follower in its place. The horde
+   * is uncapped (docs/PROGRESSION.md §1), so a conversion always produces a
+   * follower — never add a headcount check here. Shared by the normal 1.0s
    * CONVERTING delay and demo shortcuts that skip straight to the result. */
   private finishConversion(soldier: Soldier): void {
     this.soldiers = this.soldiers.filter((s) => s !== soldier);
-    if (this.usedSlots() + 1 <= HORDE_CAP) {
-      const rank = this.followers.length;
-      this.followers.push(new Follower(this, soldier.x, soldier.y, rank));
-    }
+    const rank = this.followers.length;
+    this.followers.push(new Follower(this, soldier.x, soldier.y, rank));
     soldier.destroy();
   }
 
@@ -726,12 +736,13 @@ export class GameScene extends Phaser.Scene {
         this.beginConversion(s);
         break;
       }
-      case "hordeCap": {
-        // 4 Brutes = 8 slots = the cap, exactly. Spawned directly as
-        // BRUTE so they don't also trigger auto-fusion (that only fires
-        // on 4+ BASE followers). They're inside engageRadius of the
-        // soldier below, so they close and execute it unprompted — no
-        // feed from Emily needed to reach the blocked conversion.
+      case "uncappedHorde": {
+        // 4 Brutes was exactly the old HORDE_CAP (8 slots), the point at
+        // which a conversion used to be swallowed. Spawned directly as
+        // BRUTE so they don't also trigger auto-fusion (that only fires on
+        // 4+ BASE followers). They're inside engageRadius of the soldier
+        // below, so they close and execute it unprompted — no feed from
+        // Emily needed to reach the conversion.
         for (let i = 0; i < 4; i++) this.spawnFollowerNear(-40 - i * 24, "BRUTE");
         this.spawnSoldierNear(40).paralyze();
         break;

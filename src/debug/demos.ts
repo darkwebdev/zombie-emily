@@ -42,10 +42,10 @@ export const DEMOS = [
       "Sticks a limb in a paralyzed soldier and leaves Emily out of ammo, then forces conversion so the limb falls free — it only comes back when she walks over and touches it.",
   },
   {
-    name: "hordeCap",
-    label: "Horde Cap",
+    name: "uncappedHorde",
+    label: "Uncapped Horde",
     description:
-      "Fills the horde's 8-slot cap with 4 Brutes (2 slots each), then paralyzes one more soldier for them to execute — showing that converting past the cap consumes the body but adds no follower.",
+      "Spawns 4 Brutes — exactly what the old 8-slot cap used to allow — then paralyzes one more soldier for them to execute. The horde is uncapped now, so that conversion adds a 5th follower instead of consuming the body for nothing.",
   },
   {
     name: "death",

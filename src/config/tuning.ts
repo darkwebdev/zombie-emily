@@ -25,7 +25,6 @@ export const FOLLOWER = {
   engageRadius: 140,
   reach: 16, // matches COMBAT.contactRange — a no-op for base followers
   hitHalfWidth: 8,
-  slotCost: 1,
   trailSpacing: 6, // matches TRAIL.spacingSamples
   spawnYOffset: 0,
 };
@@ -47,7 +46,6 @@ export const BRUTE = {
   engageRadius: 200,
   reach: 20,
   hitHalfWidth: 12,
-  slotCost: 2,
   trailSpacing: 4, // hugs Emily tighter to offset the lower speed
   spawnYOffset: -4, // taller sprite (36 vs 28) — keeps its feet on the ground line
 };
@@ -175,17 +173,25 @@ export const AGGRO = {
   rejectFlashDuration: 0.1,
 };
 
-// A slot budget, not a headcount — a base follower costs 1 slot, a Brute
-// costs 2 (see FOLLOWER_STATS). Fusion always frees slots (4 base = 4
-// slots -> 1 Brute = 2 slots), so it's the pressure valve on this cap.
-export const HORDE_CAP = 8;
-
 export const COMBAT = {
   contactRange: 16,
 };
 
+// The horde is uncapped by design (see docs/PROGRESSION.md §1) — automatic
+// fusion is the only compressor, and it keeps growth sub-linear. The one
+// real ceiling is structural, not designed: a follower at rank N reads the
+// sample N * trailSpacing back, so once bufferSize / spacingSamples is
+// exceeded (~20 base followers) targetXForOffset's clamp hands every
+// further follower the same oldest sample and they pile up at one x.
+// It's a diagnostic threshold (see the ?debug=1 warning in GameScene),
+// not a cap to enforce — don't reintroduce a headcount limit.
 export const TRAIL = {
   sampleIntervalMs: 60,
   bufferSize: 120,
   spacingSamples: 6,
 };
+
+/** Base followers past which the trail buffer degenerates — see TRAIL. */
+export const TRAIL_DEGENERATION_THRESHOLD = Math.floor(
+  TRAIL.bufferSize / TRAIL.spacingSamples,
+);

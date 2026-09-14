@@ -16,10 +16,15 @@ the debate, this file holds the outcome.
 ## 1. Remove `HORDE_CAP` and `slotCost`
 
 **Decided** — approved on [#3](https://github.com/darkwebdev/zombie-emily/issues/3).
-**Implementation: not done.** Phase 2 of the epic, alongside the enabling
-refactors ([#4](https://github.com/darkwebdev/zombie-emily/issues/4)). As of
-this writing `HORDE_CAP = 8` and `slotCost` are still live in
-`src/config/tuning.ts`, and `GameScene.finishConversion` still gates on them.
+**Implementation: done** — `HORDE_CAP`, `slotCost` and `GameScene.usedSlots()`
+are deleted, and `finishConversion` no longer gates on anything: a conversion
+always produces a follower. `TRAIL_DEGENERATION_THRESHOLD` and a
+`TRAIL SATURATED` `?debug=1` warning replace them as a diagnostic. The
+`hordeCap` demo/test was repurposed into `uncappedHorde`, which runs the same
+setup (4 Brutes — exactly the old 8-slot budget — plus one more soldier to
+convert) and asserts the opposite outcome: a 5th follower is added rather than
+the body being consumed for nothing. That is the check that catches a headcount
+limit being reintroduced.
 
 ### The decision
 

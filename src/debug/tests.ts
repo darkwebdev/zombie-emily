@@ -1,4 +1,4 @@
-import { COMBAT, EMILY, FOLLOWER, HORDE_CAP, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
+import { COMBAT, EMILY, FOLLOWER, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
 import { SPAWNS } from "../levels/level1";
 import type { DemoName } from "./demos";
 import type { GameScene } from "../scenes/GameScene";
@@ -308,27 +308,28 @@ export const TESTS: TestCase[] = [
     }),
   },
   {
-    demo: "hordeCap",
-    name: "Horde cap blocks a conversion once slots are full",
+    demo: "uncappedHorde",
+    name: "Converting past the old cap still adds a follower",
     checkpoints: single(200, (scene) => {
       // The Brutes engage and kill the paralyzed soldier on their own
       // (~0.5s), then 1.0s convert + margin.
       const s = scene.getTestSnapshot();
       return [
-        { label: "No 9th slot added (still 4 Brutes)", pass: s.followers.length === 4, detail: `followers=${s.followers.length}` },
         {
-          // The cap is a slot budget, not a headcount — 4 Brutes x 2 slots
-          // is what makes this exactly full, so that's what to assert.
-          label: `Slot budget still exactly full (${HORDE_CAP}/${HORDE_CAP})`,
-          pass: s.followers.reduce((sum, f) => sum + f.stats.slotCost, 0) === HORDE_CAP,
-          detail: `slots=${s.followers.reduce((sum, f) => sum + f.stats.slotCost, 0)}`,
+          // The load-bearing check: under HORDE_CAP this was 4, because
+          // 4 Brutes filled the 8-slot budget and the 5th conversion was
+          // swallowed. If a headcount limit is ever reintroduced, this is
+          // the check that catches it.
+          label: "5th follower added (4 Brutes + the new base follower)",
+          pass: s.followers.length === 5,
+          detail: `followers=${s.followers.length}`,
         },
-        { label: "Soldier still consumed despite the block", pass: s.soldiers.length === 0, detail: `soldiers=${s.soldiers.length}` },
         {
-          label: "Roster unaffected (all still Brutes)",
-          pass: s.followers.every((f) => f.kind === "BRUTE"),
+          label: "The new arrival is a BASE follower",
+          pass: s.followers.filter((f) => f.kind === "BASE").length === 1,
           detail: `kinds=[${s.followers.map((f) => f.kind)}]`,
         },
+        { label: "Soldier consumed", pass: s.soldiers.length === 0, detail: `soldiers=${s.soldiers.length}` },
       ];
     }),
   },
@@ -585,13 +586,11 @@ export const TESTS: TestCase[] = [
         { label: "Exactly 1 follower remains", pass: s.followers.length === 1, detail: `followers=${s.followers.length}` },
         { label: "It's a BRUTE", pass: brute?.kind === "BRUTE", detail: `kind=${brute?.kind}` },
         { label: "Spawned at full HP", pass: brute?.hp === brute?.stats.hp, detail: `hp=${brute?.hp}/${brute?.stats.hp}` },
-        {
-          // 4 base followers (4 slots) collapsing into one Brute (2 slots)
-          // is what makes fusion the pressure valve on HORDE_CAP.
-          label: "Fusion freed slots (4 -> 2)",
-          pass: s.followers.reduce((sum, f) => sum + f.stats.slotCost, 0) === 2,
-          detail: `slots=${s.followers.reduce((sum, f) => sum + f.stats.slotCost, 0)}`,
-        },
+        // (A slot-budget check used to sit here, proving fusion freed
+        // capacity under HORDE_CAP. The cap is gone — docs/PROGRESSION.md
+        // §1 — and rewriting it against `kind` would only have restated
+        // the two checks above, so it's dropped rather than kept as a
+        // check that can't fail.)
       ];
     }),
   },
