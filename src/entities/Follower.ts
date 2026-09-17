@@ -1,10 +1,7 @@
 import Phaser from "phaser";
 import { FOLLOWER, FOLLOWER_STATS, FollowerKind } from "../config/tuning";
+import { CHARACTER_TEXTURE, applyCharacterArt } from "./characterArt";
 import { Soldier } from "./Soldier";
-
-const TEXTURE_KEY = "follower";
-const BRUTE_TEXTURE_KEY = "follower_brute";
-const BRUTE_COLOR = 0x2f4f2f;
 
 export type FollowerMode = "FOLLOW" | "RUSH";
 
@@ -25,30 +22,13 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
    * past it again. */
   hasJoined = false;
 
-  static ensureTexture(scene: Phaser.Scene): void {
-    if (!scene.textures.exists(TEXTURE_KEY)) {
-      const g = scene.add.graphics();
-      g.fillStyle(0x4a6b4a, 1);
-      g.fillRect(0, 0, 12, 28);
-      g.generateTexture(TEXTURE_KEY, 12, 28);
-      g.destroy();
-    }
-    if (!scene.textures.exists(BRUTE_TEXTURE_KEY)) {
-      const g = scene.add.graphics();
-      g.fillStyle(BRUTE_COLOR, 1);
-      g.fillRect(0, 0, 20, 36);
-      g.generateTexture(BRUTE_TEXTURE_KEY, 20, 36);
-      g.destroy();
-    }
-  }
-
   constructor(scene: Phaser.Scene, x: number, y: number, rank: number, kind: FollowerKind = "BASE") {
-    Follower.ensureTexture(scene);
     const stats = FOLLOWER_STATS[kind];
-    super(scene, x, y + stats.spawnYOffset, kind === "BRUTE" ? BRUTE_TEXTURE_KEY : TEXTURE_KEY);
+    super(scene, x, y + stats.spawnYOffset, CHARACTER_TEXTURE[kind]);
     scene.add.existing(this);
     scene.physics.add.existing(this);
     (this.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
+    applyCharacterArt(this, kind);
     this.rank = rank;
     this.kind = kind;
     this.stats = stats;
@@ -77,6 +57,7 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
       return;
     }
     const dx = targetX - this.x;
+    this.setFlipX(dx < 0);
     if (Math.abs(dx) < this.stats.deadzone) {
       this.setVelocityX(0);
     } else {
@@ -87,6 +68,7 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
   /** Beelines at boosted speed during an aggro burst; no steering/re-acquire. */
   rushToward(targetX: number): void {
     const dx = targetX - this.x;
+    this.setFlipX(dx < 0);
     if (Math.abs(dx) < 10) {
       this.setVelocityX(0);
     } else {

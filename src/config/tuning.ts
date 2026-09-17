@@ -7,14 +7,98 @@ export const WORLD = {
   groundY: 150,
 };
 
+/** The y everything stands on: Emily's y is her centre, and her body is
+ * EMILY_SPRITE.bodyHeight (28) tall, so her feet are 14 below it. */
+export const GROUND_LINE = WORLD.groundY + 14;
+
+// Parallax layers, cut from the environment board by
+// tools/extract_background.py (which documents why they're built the way
+// they are). Back to front; `depth` keeps them behind every character.
+//
+// artScale is source-art pixels per world pixel. It differs per layer
+// because the board draws them at different implied scales — the fence
+// panel is 117px for something about Emily's height plus a bit, while the
+// skyline panels are ~150px for an entire city. 3 puts one texture pixel on
+// one screen pixel (as crisp as Emily); 1 blows the art up 3x, which is what
+// the distant layers need to cover the sky at all.
+//
+// Heights aren't listed: each layer is as tall as its own texture divided by
+// its artScale, read off the loaded texture so there's no second copy of a
+// number the art already decides.
+export const BACKGROUND = {
+  layers: [
+    { key: "bg-far", y: 0, artScale: 1, parallax: 0.15, depth: -100 },
+    { key: "bg-mid", y: 16, artScale: 1, parallax: 0.35, depth: -90 },
+    { key: "bg-fence", y: GROUND_LINE - 39, artScale: 3, parallax: 0.65, depth: -80 },
+    // The street itself: parallax 1 means it tracks the camera exactly, i.e.
+    // it sits still in the world like the ground it represents.
+    { key: "bg-ground", y: GROUND_LINE, artScale: 3, parallax: 1, depth: -70 },
+  ],
+};
+
 export const EMILY = {
-  speed: 140,
+  // Her one ground speed, and it reads as a walk — walk is her only
+  // locomotion cycle.
+  // Deliberately above every enemy's speed (SOLDIER 70 is the fastest) so she
+  // can always disengage, and below BRUTE's 105 so the slowest follower can
+  // still keep station on the trail behind her.
+  speed: 95,
   feedTime: 2.0,
   maxHp: 10,
   iframeDuration: 0.6,
   deathFadeDuration: 1.2,
 };
 
+// Emily's frames are cut from the hand-authored character board by
+// tools/extract_sprites.py — the only image assets in the project; everything
+// else is still runtime-generated shapes.
+//
+// artScale exists because the game renders a 320x180 world at WORLD.zoom = 3.
+// A sprite authored at world scale would be blown up into 3x3 blocks, so the
+// frames are authored 3x oversized and drawn back down by renderScale: the
+// world box stays 40x40, but one texture pixel lands on exactly one screen
+// pixel. Keep artScale == WORLD.zoom, and re-run the extraction script if it
+// changes. Everything below in world units is unchanged by any of this — the
+// art is purely visual, her hitbox is the same 14x28 box at the ground line.
+const EMILY_ART_SCALE = 3;
+
+/** World units of ground covered per frame of the 11-frame walk cycle — i.e.
+ * her stride length divided across the sheet. EMILY_SPRITE.walkFps is derived
+ * from this so cadence always tracks speed; see the comment on walkFps. */
+const WALK_ADVANCE_PER_FRAME = 8.75;
+
+export const EMILY_SPRITE = {
+  artScale: EMILY_ART_SCALE,
+  renderScale: 1 / EMILY_ART_SCALE,
+  frameWidth: 40 * EMILY_ART_SCALE,
+  frameHeight: 40 * EMILY_ART_SCALE,
+  /** Frame row 38 of 40 (the contact row) sits on Emily's y + bodyHeight/2. */
+  originY: 0.6,
+  // World units.
+  bodyWidth: 14,
+  bodyHeight: 28,
+  // Source-texture pixels, i.e. already multiplied by artScale.
+  bodyOffsetX: 13 * EMILY_ART_SCALE,
+  bodyOffsetY: 10 * EMILY_ART_SCALE,
+  idleFps: 6,
+  // The walk cycle's cadence is *derived* from how fast she actually walks, so
+  // retuning EMILY.speed can't leave her feet skating over the ground: the
+  // stride length stays fixed at WALK_ADVANCE_PER_FRAME and only the frame
+  // rate moves with her. The constant is the ground distance the 11-frame
+  // sheet (art/emily-walk-sheet.png) was authored to cover per frame.
+  walkFps: EMILY.speed / WALK_ADVANCE_PER_FRAME,
+  throwFps: 16,
+  // Ammo is read off the top-of-screen HUD (see systems/Hud.ts), not off her
+  // body — a floating pip readout pinned above her head made the ammo count
+  // move around the screen with her, and read as extra limbs sticking out of
+  // the art, which already draws both her arms.
+  //
+  // Debug-only (the anim* demos in src/debug/demos.ts): the walk preview runs
+  // at her real arrow-key speed. The pacing window keeps her on screen instead
+  // of walking off down the level while you're watching the cycle.
+  previewWalkFraction: 1,
+  previewPaceHalfWidth: 100,
+};
 export const FOLLOWER = {
   speed: 125,
   deadzone: 4,
@@ -157,12 +241,67 @@ export const ENEMY_STATS: Record<EnemyKind, typeof SOLDIER> = {
 
 export const SHIELD_FLASH_DURATION = 0.15;
 
+// Enemy and follower art, cut from the second hand-authored board by
+// tools/extract_enemies.py (which documents the three rules it follows). Same
+// 3x oversizing as Emily's frames and for the same reason — see the comment
+// on EMILY_ART_SCALE.
+//
+// Nothing here changes gameplay. Every hitbox below is the exact world box the
+// runtime-generated rectangle it replaces used to be, so swapping in the art
+// can't shift a single range check; the art is drawn around that box, bottom-
+// centred on it, rather than the box being fitted to the art. The figures are
+// all wider than their hitboxes (the Brute especially, since the board draws
+// its bulk as width), which is deliberate: reach is what the player is being
+// asked to read, and reach is the box.
+export const CHARACTER_ART = {
+  artScale: EMILY_ART_SCALE,
+  renderScale: 1 / EMILY_ART_SCALE,
+  hitbox: {
+    STANDARD: { width: 12, height: 28 },
+    SHIELD: { width: 16, height: 28 },
+    RIFLEMAN: { width: 10, height: 28 },
+    BASE: { width: 12, height: 28 },
+    BRUTE: { width: 20, height: 36 },
+  } as Record<EnemyKind | FollowerKind, { width: number; height: number }>,
+};
+
 export const LIMB = {
+  // Square hitbox kept from when the limb was an 8x8 rectangle — the arm art
+  // that replaced it is wider, but the throw was tuned against this box.
+  hitboxSize: 8,
   throwSpeed: 320,
   throwLift: 120,
   throwCooldown: 0.4,
   gravityY: 600,
   ammoMax: 2,
+  // The overhead down-arrow that marks where a thrown limb is. Sits on one
+  // fixed line for every limb rather than a fixed distance above each, so the
+  // markers read as a row of pointers to scan along. That line is clear of
+  // every character's head, so a marker can never be mistaken for something
+  // attached to a body.
+  marker: {
+    width: 7,
+    height: 6,
+    color: 0xffd54a,
+    y: GROUND_LINE - 56,
+    depth: 50,
+    bobAmplitude: 1.5,
+    bobSpeed: 3,
+  },
+};
+
+// Screen-space layout for the fixed top-left panel (systems/Hud.ts). Only the
+// ammo readout is listed: the HP/aggro bar geometry predates this block and
+// still lives inline there. Coordinates are screen pixels, unzoomed.
+export const HUD = {
+  ammoLabelX: 150,
+  ammoPipX: 196,
+  ammoPipY: 59,
+  ammoPipWidth: 16,
+  ammoPipHeight: 10,
+  ammoPipGap: 4,
+  ammoPipColor: 0xd9b382,
+  ammoPipEmptyColor: 0x2a2a2a,
 };
 
 export const AGGRO = {
@@ -173,8 +312,23 @@ export const AGGRO = {
   rejectFlashDuration: 0.1,
 };
 
+const CONTACT_RANGE = 16;
+
 export const COMBAT = {
-  contactRange: 16,
+  contactRange: CONTACT_RANGE,
+  // Limb pickup differs from every other contact check in two ways, both
+  // because a limb is a wide object lying on the floor rather than a
+  // character standing on it:
+  //
+  // - It's measured **horizontally only**. Everything stands on one ground
+  //   line, so vertical separation between entities is just sprite-centre
+  //   bookkeeping — Emily's centre is 14 above her feet, a limb's is ~3. A
+  //   centre-to-centre measure spends 11 of the 16 units on that offset and
+  //   fails exactly when she is standing on top of the limb.
+  // - It's measured to the limb's nearest **edge**, not its centre. The arm
+  //   art is 16 wide; a limb embedded in a soldier Emily is feeding on sits
+  //   ~17 from her centre but is physically touching her.
+  limbPickupRange: CONTACT_RANGE,
 };
 
 // The horde is uncapped by design (see docs/PROGRESSION.md §1) — automatic

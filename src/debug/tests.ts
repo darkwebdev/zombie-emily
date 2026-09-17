@@ -1,5 +1,8 @@
-import { COMBAT, EMILY, FOLLOWER, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
+import Phaser from "phaser";
+import { CHARACTER_ART, COMBAT, EMILY, EMILY_SPRITE, FOLLOWER, GROUND_LINE, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
+import { EMILY_ANIM } from "../entities/Emily";
 import { SPAWNS } from "../levels/level1";
+import { touchInput } from "../systems/touchControls";
 import type { DemoName } from "./demos";
 import type { GameScene } from "../scenes/GameScene";
 
@@ -46,6 +49,278 @@ function single(steps: number, assert: (scene: GameScene) => Check[]): Checkpoin
  * either be watched recovering OR be re-paralyzed, not both in one run). */
 export const TESTS: TestCase[] = [
   {
+    demo: "animIdle",
+    name: "Idle preview: she stands still and loops the idle cycle",
+    checkpoints: single(20, (scene) => {
+      const emily = scene.getTestSnapshot().emily;
+      const body = emily.body as Phaser.Physics.Arcade.Body;
+      return [
+        { label: "Standing still", pass: body.velocity.x === 0, detail: `vx=${body.velocity.x}` },
+        {
+          label: "Idle cycle playing",
+          pass: emily.anims.currentAnim?.key === EMILY_ANIM.idle && emily.anims.isPlaying,
+          detail: `anim=${emily.anims.currentAnim?.key} playing=${emily.anims.isPlaying}`,
+        },
+        {
+          // An empty level is an instant win everywhere else — the preview
+          // has to suppress that or there'd be nothing to watch.
+          label: "Empty level doesn't end the preview as CLEARED",
+          pass: !scene.getTestSnapshot().isCleared,
+          detail: `cleared=${scene.getTestSnapshot().isCleared}`,
+        },
+      ];
+    }),
+  },
+  {
+    demo: "animWalk",
+    name: "Walk preview: real arrow-key speed, walk cycle, and she turns inside the pacing window",
+    checkpoints: [
+      {
+        afterMs: 320,
+        assert: (scene) => {
+          const emily = scene.getTestSnapshot().emily;
+          const body = emily.body as Phaser.Physics.Arcade.Body;
+          const want = EMILY.speed * EMILY_SPRITE.previewWalkFraction;
+          return [
+            {
+              // The preview drives her at exactly EMILY.speed, same as an
+              // arrow key, so this is the guard on arrow-key movement being
+              // a walk and nothing else.
+              label: `Moving at ${Math.round(want)}px/s, her real arrow-key speed`,
+              pass: Math.abs(Math.abs(body.velocity.x) - want) < 1,
+              detail: `vx=${body.velocity.x}`,
+            },
+            {
+              label: "Walk cycle playing",
+              pass: emily.anims.currentAnim?.key === EMILY_ANIM.walk && emily.anims.isPlaying,
+              detail: `anim=${emily.anims.currentAnim?.key}`,
+            },
+            {
+              // The walk sheet is the one animation cut from its own grid
+              // sheet rather than the character board, so it's the one whose
+              // frame count can silently change when the art is re-exported.
+              // Compared against the loaded texture, not a literal, so
+              // re-authoring the cycle at a different length stays a
+              // one-file change.
+              label: "Walk cycle plays every frame in the sheet",
+              pass: emily.anims.currentAnim?.frames.length === scene.textures.get("emily-walk").frameTotal - 1,
+              detail: `anim=${emily.anims.currentAnim?.frames.length} sheet=${scene.textures.get("emily-walk").frameTotal - 1}`,
+            },
+            { label: "Heading right, sprite unflipped", pass: emily.facing === 1 && !emily.flipX, detail: `facing=${emily.facing} flipX=${emily.flipX}` },
+          ];
+        },
+      },
+      {
+        // previewPaceHalfWidth (100px) at EMILY.speed (95px/s) is a bit over
+        // 1s out, so by now she has hit the edge of the window and turned.
+        afterMs: 1500,
+        assert: (scene) => {
+          const emily = scene.getTestSnapshot().emily;
+          return [
+            {
+              label: "Turned around at the edge of the pacing window",
+              pass: emily.facing === -1,
+              detail: `facing=${emily.facing} x=${Math.round(emily.x)}`,
+            },
+            { label: "Turning flips the sprite", pass: emily.flipX === true, detail: `flipX=${emily.flipX}` },
+            {
+              label: "Still walking after the turn",
+              pass: emily.anims.currentAnim?.key === EMILY_ANIM.walk && emily.anims.isPlaying,
+              detail: `anim=${emily.anims.currentAnim?.key}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "artRoster",
+    name: "Enemy/follower art: feet on the ground line, hitboxes untouched",
+    checkpoints: single(20, (scene) => {
+      const { soldiers, followers } = scene.getTestSnapshot();
+      const roster = [...soldiers, ...followers];
+      const checks: Check[] = [
+        {
+          label: "One of every enemy and follower kind is on screen",
+          pass: new Set(roster.map((e) => e.kind)).size === 5,
+          detail: roster.map((e) => e.kind).join(","),
+        },
+      ];
+      for (const entity of roster) {
+        const body = entity.body as Phaser.Physics.Arcade.Body;
+        const box = CHARACTER_ART.hitbox[entity.kind];
+        // The figures are all different sizes and none of them is the size of
+        // its hitbox, so both of these would break silently the moment the
+        // art is re-exported at a different height or a kind is added without
+        // a hitbox entry: the sprite would either float/sink or quietly start
+        // fighting with a box the size of its silhouette.
+        checks.push({
+          label: `${entity.kind}: feet on the ground line`,
+          pass: Math.abs(entity.y + (1 - entity.originY) * entity.displayHeight - GROUND_LINE) < 0.5,
+          detail: `bottom=${(entity.y + (1 - entity.originY) * entity.displayHeight).toFixed(1)} groundLine=${GROUND_LINE}`,
+        });
+        checks.push({
+          label: `${entity.kind}: hitbox is still ${box.width}x${box.height}, bottom-centred on it`,
+          pass:
+            // body.width/height read back in world units: setSize takes
+            // source-texture pixels, but Arcade stores them scaled.
+            Math.abs(body.width - box.width) < 0.01 &&
+            Math.abs(body.height - box.height) < 0.01 &&
+            Math.abs(body.x + body.width / 2 - entity.x) < 0.5 &&
+            Math.abs(body.y + body.height - GROUND_LINE) < 0.5,
+          detail: `w=${body.width.toFixed(1)} h=${body.height.toFixed(1)} cx=${(body.x + body.width / 2).toFixed(1)} x=${entity.x.toFixed(1)} bottom=${(body.y + body.height).toFixed(1)}`,
+        });
+      }
+      return checks;
+    }),
+  },
+  {
+    demo: "animThrow",
+    name: "Throw preview: loops the throw without spending ammo",
+    checkpoints: [
+      {
+        afterMs: 48,
+        assert: (scene) => {
+          const s = scene.getTestSnapshot();
+          return [
+            {
+              label: "Throw animation playing",
+              pass: s.emily.anims.currentAnim?.key === EMILY_ANIM.throw && s.emily.anims.isPlaying,
+              detail: `anim=${s.emily.anims.currentAnim?.key}`,
+            },
+            { label: `Ammo untouched (${LIMB.ammoMax})`, pass: s.ammo === LIMB.ammoMax, detail: `got ${s.ammo}` },
+          ];
+        },
+      },
+      {
+        // The throw is a one-shot: by 600ms a single play is long over, so
+        // this only passes if the preview is genuinely replaying it. The
+        // "reset" test asserts the opposite — that a real throw hands back
+        // to idle — so the two together pin down both behaviors.
+        afterMs: 600,
+        assert: (scene) => {
+          const s = scene.getTestSnapshot();
+          return [
+            {
+              label: "Still looping the throw, not settled into idle",
+              pass: s.emily.anims.currentAnim?.key === EMILY_ANIM.throw && s.emily.anims.isPlaying,
+              detail: `anim=${s.emily.anims.currentAnim?.key}`,
+            },
+            {
+              label: "Cosmetic only — no limb was ever spawned",
+              pass: s.limbs.length + s.stuckLimbs.length + s.fallingLimbs.length + s.groundedLimbs.length === 0,
+              detail: `flying=${s.limbs.length} grounded=${s.groundedLimbs.length}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "reset",
+    // Emily is drawn from 40x40 animation frames but fights with a 14x28 box
+    // at the ground line. Every number that keeps those two in agreement
+    // (EMILY_SPRITE.originY and the body offsets) is invisible on a type
+    // check and easy to break while retouching the art, so assert it.
+    name: "Emily's animation never moves her hitbox",
+    run: (scene) => {
+      scene.getTestSnapshot().emily.facing = -1;
+      scene.debugThrowLimb();
+    },
+    checkpoints: [
+      {
+        afterMs: 48,
+        assert: (scene) => {
+          const emily = scene.getTestSnapshot().emily;
+          const body = emily.body as Phaser.Physics.Arcade.Body;
+          const feet = WORLD.groundY + EMILY_SPRITE.bodyHeight / 2;
+          return [
+            {
+              label: `Hitbox still ${EMILY_SPRITE.bodyWidth}x${EMILY_SPRITE.bodyHeight}`,
+              pass: body.width === EMILY_SPRITE.bodyWidth && body.height === EMILY_SPRITE.bodyHeight,
+              detail: `got ${body.width}x${body.height}`,
+            },
+            {
+              label: `Feet on the ground line (y=${feet})`,
+              pass: Math.abs(body.bottom - feet) < 0.001,
+              detail: `body.bottom=${body.bottom}`,
+            },
+            {
+              label: "Throwing plays the throw animation",
+              pass: emily.anims.currentAnim?.key === EMILY_ANIM.throw && emily.anims.isPlaying,
+              detail: `anim=${emily.anims.currentAnim?.key} playing=${emily.anims.isPlaying}`,
+            },
+            { label: "Facing left flips the sprite", pass: emily.flipX === true, detail: `flipX=${emily.flipX}` },
+          ];
+        },
+      },
+      {
+        // The throw is 4 frames at EMILY_SPRITE.throwFps — a one-shot, so it
+        // has to hand control back rather than freezing on its last frame.
+        afterMs: 600,
+        assert: (scene) => {
+          const emily = scene.getTestSnapshot().emily;
+          const body = emily.body as Phaser.Physics.Arcade.Body;
+          return [
+            {
+              label: "Standing still returns to idle once the throw ends",
+              pass: emily.anims.currentAnim?.key === EMILY_ANIM.idle && emily.anims.isPlaying,
+              detail: `anim=${emily.anims.currentAnim?.key} playing=${emily.anims.isPlaying}`,
+            },
+            {
+              label: "Hitbox unmoved after the animation swap",
+              pass: Math.abs(body.bottom - (WORLD.groundY + EMILY_SPRITE.bodyHeight / 2)) < 0.001,
+              detail: `body.bottom=${body.bottom}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "reset",
+    name: "On-screen touch controls drive Emily like the keyboard does",
+    // The touch overlay is DOM, so it can't be tapped from here — but the
+    // state it writes is the same state GameScene reads, and that wiring is
+    // the part that can actually break. Driving it directly proves the path
+    // from a button press to Emily moving, without simulating a finger.
+    run: (scene) => {
+      void scene;
+      touchInput.__setForTest({ right: true });
+    },
+    checkpoints: [
+      {
+        afterMs: 3 * 16,
+        assert: (scene) => {
+          const body = scene.getTestSnapshot().emily.body as Phaser.Physics.Arcade.Body;
+          const checks = [
+            {
+              // Asserting velocity rather than x: a position check would also
+              // pass on a single stray frame of drift, while velocity is the
+              // thing handleMovement actually sets from the input.
+              label: "Held touch-right moves Emily right at full speed",
+              pass: body.velocity.x === EMILY.speed,
+              detail: `vel=${body.velocity.x} expected=${EMILY.speed}`,
+            },
+          ];
+          // Release for the next checkpoint — a held button whose finger slid
+          // off has to actually stop her, not leave her walking forever.
+          touchInput.__setForTest({ right: false });
+          return checks;
+        },
+      },
+      {
+        afterMs: 3 * 16,
+        assert: (scene) => {
+          const body = scene.getTestSnapshot().emily.body as Phaser.Physics.Arcade.Body;
+          return [
+            { label: "Releasing it stops her", pass: body.velocity.x === 0, detail: `vel=${body.velocity.x}` },
+          ];
+        },
+      },
+    ],
+  },
+  {
     demo: "reset",
     name: "Reset boots the full level cleanly",
     checkpoints: single(1, (scene) => {
@@ -73,6 +348,53 @@ export const TESTS: TestCase[] = [
           label: "Neither game-over nor cleared",
           pass: !s.isGameOver && !s.isCleared,
           detail: `gameOver=${s.isGameOver} cleared=${s.isCleared}`,
+        },
+      ];
+    }),
+  },
+  {
+    demo: "reset",
+    // The parallax rates are invisible to everything but the eye, and they
+    // have silently broken once already: camera.scrollX is in *screen*
+    // pixels once the camera is zoomed, so feeding it to the layers scrolled
+    // every one of them 3x too fast. Nothing failed, nothing threw — the
+    // background was just wrong. Moving Emily well down the level is what
+    // makes the camera scroll at all; at spawn it is clamped to the level's
+    // left edge and every offset is 0, which any broken formula also passes.
+    name: "Background layers scroll at their own rates, in world units",
+    run: (scene) => scene.getTestSnapshot().emily.setX(WORLD.levelWidth / 2),
+    checkpoints: single(5, (scene) => {
+      const s = scene.getTestSnapshot();
+      const ground = s.backgroundLayers.find((l) => l.key === "bg-ground");
+      return [
+        {
+          label: `Camera actually scrolled (needed for the rest to mean anything)`,
+          pass: s.cameraWorldX > WORLD.width,
+          detail: `worldView.x=${Math.round(s.cameraWorldX)}`,
+        },
+        {
+          // tilePositionX is in texture pixels and Phaser shifts the tile by
+          // tilePositionX * tileScale, hence the artScale factor.
+          label: "Every layer is offset by its own parallax rate",
+          pass: s.backgroundLayers.every(
+            (l) => Math.abs(l.tilePositionX - s.cameraWorldX * l.parallax * l.artScale) < 0.01,
+          ),
+          detail: s.backgroundLayers
+            .map((l) => `${l.key}=${Math.round(l.tilePositionX)}/${Math.round(s.cameraWorldX * l.parallax * l.artScale)}`)
+            .join(" "),
+        },
+        {
+          // The street is the one layer that must NOT drift: it stands in
+          // for solid ground, so anything other than 1:1 makes Emily look
+          // like she's walking on a treadmill.
+          label: "The street tracks the camera exactly (parallax 1)",
+          pass: ground?.parallax === 1,
+          detail: `parallax=${ground?.parallax}`,
+        },
+        {
+          label: "No two layers share a rate (they'd be one flat layer)",
+          pass: new Set(s.backgroundLayers.map((l) => l.parallax)).size === s.backgroundLayers.length,
+          detail: `rates=[${s.backgroundLayers.map((l) => l.parallax)}]`,
         },
       ];
     }),
@@ -249,6 +571,121 @@ export const TESTS: TestCase[] = [
         },
       ];
     }),
+  },
+  {
+    demo: "limbMiss",
+    name: "A missed limb lands flat on the ground, marked by an overhead arrow",
+    checkpoints: [
+      {
+        // Airborne: ~0.2s in, it's still well above where it will settle.
+        afterMs: 200,
+        assert: (scene) => {
+          const s = scene.getTestSnapshot();
+          const limb = s.limbs[0];
+          return [
+            { label: "Limb in flight", pass: !!limb && !limb.resolved, detail: `limbs=${s.limbs.length}` },
+            {
+              label: "Marker tracks the limb's x while it flies",
+              pass: !!limb && Math.abs(limb.marker.x - limb.x) < 0.001,
+              detail: `marker.x=${limb ? Math.round(limb.marker.x) : "-"} limb.x=${limb ? Math.round(limb.x) : "-"}`,
+            },
+          ];
+        },
+      },
+      {
+        afterMs: 900,
+        assert: (scene) => {
+          const s = scene.getTestSnapshot();
+          const limb = s.groundedLimbs[0];
+          return [
+            { label: "Limb came to rest on the ground", pass: s.groundedLimbs.length === 1, detail: `grounded=${s.groundedLimbs.length}` },
+            {
+              // The bug this guards: the landing test used to compare
+              // against WORLD.groundY, which is Emily's *centre* — so a
+              // missed limb stopped half a body height above the floor and
+              // hung there in mid-air. It has to rest against GROUND_LINE,
+              // measured from its own bottom edge.
+              label: "Its bottom edge sits exactly on the ground line, not in mid-air",
+              pass: !!limb && Math.abs(limb.y + limb.displayHeight / 2 - GROUND_LINE) < 0.001,
+              detail: `bottom=${limb ? (limb.y + limb.displayHeight / 2).toFixed(1) : "-"} groundLine=${GROUND_LINE}`,
+            },
+            {
+              // Deliberately a fixed line rather than a fixed gap above each
+              // limb, so several markers read as a row to scan along.
+              label: "Marker floats above head height, on the shared marker line",
+              pass:
+                !!limb &&
+                Math.abs(limb.marker.y - LIMB.marker.y) <= LIMB.marker.bobAmplitude &&
+                limb.marker.y < s.emily.y - EMILY_SPRITE.bodyHeight / 2,
+              detail: `marker.y=${limb ? limb.marker.y.toFixed(1) : "-"} line=${LIMB.marker.y} emilyHead=${s.emily.y - EMILY_SPRITE.bodyHeight / 2}`,
+            },
+            {
+              label: "Marker points down at where the limb is",
+              pass: !!limb && Math.abs(limb.marker.x - limb.x) < 0.001,
+              detail: `marker.x=${limb ? Math.round(limb.marker.x) : "-"} limb.x=${limb ? Math.round(limb.x) : "-"}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "limbAutoPickup",
+    name: "A stuck limb isn't collectable until its paralysis ends, then it returns on contact",
+    // The demo puts the soldier inside contact range, so Emily is touching
+    // both it and the limb for the whole test — which is exactly what makes
+    // the first checkpoint meaningful: the limb is NOT picked up despite
+    // being in reach, because it's still holding a soldier down.
+    checkpoints: [
+      {
+        afterMs: 500,
+        assert: (scene) => {
+          const s = scene.getTestSnapshot();
+          const limb = s.stuckLimbs[0]?.sprite;
+          return [
+            { label: "Limb stuck in the soldier", pass: s.stuckLimbs.length === 1, detail: `stuck=${s.stuckLimbs.length}` },
+            { label: "Soldier still paralyzed by it", pass: s.soldiers[0]?.isParalyzed === true, detail: `state=${s.soldiers[0]?.state}` },
+            {
+              // Mirrors the pickup rule exactly — horizontal, to the limb's
+              // nearest edge (see COMBAT.limbPickupRange). Measuring this
+              // differently from the code would be checking a different
+              // thing than the game does.
+              label: "Emily is in reach of it",
+              pass: !!limb && Math.abs(s.emily.x - limb.x) - limb.displayWidth / 2 <= COMBAT.limbPickupRange,
+              detail: `gap=${limb ? (Math.abs(s.emily.x - limb.x) - limb.displayWidth / 2).toFixed(1) : "-"} range=${COMBAT.limbPickupRange}`,
+            },
+            {
+              // The invariant that keeps auto-pickup from being an exploit:
+              // if contact alone were enough, walking up to feed would yank
+              // the limb straight back out and end the paralysis for free.
+              label: "Not collected despite contact — paralysis is still running",
+              pass: s.ammo === LIMB.ammoMax - 1,
+              detail: `ammo=${s.ammo}`,
+            },
+          ];
+        },
+      },
+      {
+        // 2.0s feed + 1.0s convert + margin: the soldier is gone, so the
+        // limb's paralysis job is over and it comes free under Emily.
+        afterMs: 3600,
+        assert: (scene) => {
+          const s = scene.getTestSnapshot();
+          return [
+            { label: "Soldier converted, limb released", pass: s.stuckLimbs.length === 0 && s.soldiers.length === 0, detail: `stuck=${s.stuckLimbs.length} soldiers=${s.soldiers.length}` },
+            {
+              // The behaviour this test exists for: she's already standing
+              // there, so it's collected the moment it comes free rather
+              // than dropping to the floor to be stepped on separately.
+              label: "Collected automatically on contact, without ever lying on the ground",
+              pass: s.groundedLimbs.length === 0 && s.fallingLimbs.length === 0,
+              detail: `grounded=${s.groundedLimbs.length} falling=${s.fallingLimbs.length}`,
+            },
+            { label: "Ammo restored by the pickup", pass: s.ammo === LIMB.ammoMax, detail: `ammo=${s.ammo}` },
+          ];
+        },
+      },
+    ],
   },
   {
     demo: "limbDrop",

@@ -1,8 +1,9 @@
 import Phaser from "phaser";
-import { WORLD, EMILY, LIMB, COMBAT, AGGRO, FUSION, TRAIL_DEGENERATION_THRESHOLD } from "../config/tuning";
+import { WORLD, EMILY, EMILY_SPRITE, LIMB, COMBAT, AGGRO, FUSION, TRAIL_DEGENERATION_THRESHOLD } from "../config/tuning";
 import type { DemoName } from "../debug/demos";
 import type { EnemyKind, FollowerKind } from "../config/tuning";
 import { Emily } from "../entities/Emily";
+import { preloadCharacterArt } from "../entities/characterArt";
 import { Soldier } from "../entities/Soldier";
 import { Follower } from "../entities/Follower";
 import { Limb } from "../entities/Limb";
@@ -12,7 +13,10 @@ import { AggroSystem } from "../systems/AggroSystem";
 import { GunfireSystem } from "../systems/GunfireSystem";
 import { ParallaxBackground } from "../systems/ParallaxBackground";
 import { Hud } from "../systems/Hud";
+import { pinToScreen } from "../systems/screenPin";
+import { touchInput } from "../systems/touchControls";
 import { SPAWNS } from "../levels/level1";
+import { applyHitboxes } from "../debug/hitboxes";
 
 interface PendingConversion {
   soldier: Soldier;
@@ -31,6 +35,15 @@ const CONVERT_DURATION = 1.0;
 // seconds in a single tick. Clamp it so one frame can never simulate more
 // than this much game time, no matter how long was actually lost.
 const MAX_DT = 1 / 20;
+
+/** Which of Emily's animations a preview demo holds her in. */
+type AnimPreview = "idle" | "walk" | "throw";
+
+const ANIM_PREVIEW_BY_DEMO: Record<"animIdle" | "animWalk" | "animThrow", AnimPreview> = {
+  animIdle: "idle",
+  animWalk: "walk",
+  animThrow: "throw",
+};
 
 export class GameScene extends Phaser.Scene {
   private emily!: Emily;
@@ -52,6 +65,7 @@ export class GameScene extends Phaser.Scene {
   private hud!: Hud;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  /** Legacy alias for the throw; the real key is ↑ (cursors.up). */
   private keyJ!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyR!: Phaser.Input.Keyboard.Key;
@@ -70,14 +84,33 @@ export class GameScene extends Phaser.Scene {
    * create() has finished setting up, so every demo starts from a clean
    * slate instead of stacking on top of leftover state. */
   private pendingDemo: DemoName | null = null;
+  /** Debug-only animation preview state (the anim* demos), null in normal
+   * play — see driveAnimPreview. */
+  private animPreview: AnimPreview | null = null;
+  private animPreviewOriginX = 0;
+  private animPreviewDir: 1 | -1 = 1;
 
   constructor() {
     super("game");
   }
 
+  /** The only loaded assets in the project: Emily's animation sheets and the
+   * thrown-arm texture (src/assets, cut by tools/extract_sprites.py).
+   * Everything else is still runtime-generated shapes. */
+  preload(): void {
+    Limb.preload(this);
+    Emily.preload(this);
+    preloadCharacterArt(this);
+    ParallaxBackground.preload(this);
+  }
+
   create(): void {
+    this.animPreview = null;
     this.isGameOver = false;
     this.isCleared = false;
+    // A direction still held (or an action queued) when the scene restarts
+    // would otherwise carry into the fresh run.
+    touchInput.reset();
     this.debugMode = new URLSearchParams(location.search).has("debug");
     this.ammo = LIMB.ammoMax;
     this.soldiers = [];
@@ -90,18 +123,16 @@ export class GameScene extends Phaser.Scene {
     this.trail = new BreadcrumbTrail();
     this.aggro = new AggroSystem();
     this.gunfire = new GunfireSystem(this);
+    Limb.createMarkerTexture(this);
 
     this.physics.world.gravity.y = 0;
     this.physics.world.setBounds(0, 0, WORLD.levelWidth, WORLD.height);
 
+    // Draws the street as well as the sky layers, so there's no separate
+    // ground object any more.
     this.background = new ParallaxBackground(this);
 
-    this.add
-      .rectangle(0, WORLD.groundY + 14, WORLD.levelWidth, 4, 0x333333)
-      .setOrigin(0, 0);
-
     this.emily = new Emily(this, 80, WORLD.groundY);
-    this.emily.setAmmoVisual(this.ammo);
 
     // A demo other than plain "reset" spawns only the characters it needs
     // (see applyDemo), instead of the full level.
@@ -119,15 +150,27 @@ export class GameScene extends Phaser.Scene {
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyR = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
 
+    // The canvas is WORLD.zoom times the world size (see main.ts); this is
+    // what turns those extra pixels into magnification, so a screenful is
+    // still WORLD.width x WORLD.height of world.
+    this.cameras.main.setZoom(WORLD.zoom);
     this.cameras.main.setBounds(0, 0, WORLD.levelWidth, WORLD.height);
     // lerpX 1 = no smoothing lag, Emily stays pinned to the horizontal center
     // every frame; lerpY 0 keeps the camera from ever panning vertically,
     // since flat-ground levels never move Emily's y.
     this.cameras.main.startFollow(this.emily, true, 1, 0);
+    // Phaser only resolves the follow target and fills in camera.worldView
+    // during preRender, i.e. *after* the first update() — so anything that
+    // reads worldView on frame 1 (the off-screen entrance in
+    // updateSoldierTargeting) would otherwise see an empty rect at 0,0.
+    this.cameras.main.preRender();
 
     // Console/automation access for debugging — same gate as the demo panel.
     if (this.debugMode) {
       (window as unknown as { __scene: GameScene }).__scene = this;
+      // Demo buttons restart the scene, which resets drawDebug to its
+      // config value — re-apply the panel's toggle so it survives.
+      applyHitboxes(this);
     }
 
     if (this.pendingDemo) {
@@ -142,9 +185,12 @@ export class GameScene extends Phaser.Scene {
 
     if (this.isGameOver) return;
     if (this.isCleared) {
-      if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.scene.restart();
+      if (Phaser.Input.Keyboard.JustDown(this.keyR) || touchInput.consumeRestart()) this.scene.restart();
       return;
     }
+    // Drained even when unused, so a restart tap can't be banked and then
+    // restart the run at some arbitrary later moment.
+    touchInput.consumeRestart();
 
     this.handleFeed(dt);
     this.handleMovementAndThrow(dt);
@@ -153,7 +199,8 @@ export class GameScene extends Phaser.Scene {
     this.trail.update(dt * 1000, this.emily.x);
 
     this.aggro.update(dt, this.followers.length);
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+    const rushPressed = Phaser.Input.Keyboard.JustDown(this.keySpace) || touchInput.consumeRush();
+    if (rushPressed) {
       this.aggro.tryActivate(this.followers, this.soldiers);
     }
     this.aggro.resolveRushExits(this.followers);
@@ -208,7 +255,7 @@ export class GameScene extends Phaser.Scene {
     this.updateFallingLimbs();
     this.handleLimbPickup();
 
-    this.background.update(this.cameras.main.scrollX);
+    this.background.update(this.cameras.main.worldView.x);
 
     this.hud.update(
       dt,
@@ -219,13 +266,22 @@ export class GameScene extends Phaser.Scene {
       this.aggro.rejectFlashRemaining,
       this.followers.length,
       this.followers.filter((f) => f.isBrute).length,
+      this.ammo,
     );
 
     if (this.emily.isDead) {
       this.triggerDeath();
       return;
     }
-    if (this.soldiers.length === 0 && this.pendingConversions.length === 0 && !this.isCleared) {
+    // An animation preview deliberately spawns an empty level, which would
+    // otherwise read as an instant win and freeze the scene on the CLEARED
+    // screen before anything could be watched.
+    if (
+      !this.animPreview &&
+      this.soldiers.length === 0 &&
+      this.pendingConversions.length === 0 &&
+      !this.isCleared
+    ) {
       this.showCleared();
     }
 
@@ -280,26 +336,38 @@ export class GameScene extends Phaser.Scene {
     // A diagnostic, not a cap — see TRAIL in tuning.ts.
     if (this.followers.length >= TRAIL_DEGENERATION_THRESHOLD) {
       this.debugLabels.push(
-        this.add
-          .text(4, 4, `TRAIL SATURATED ${this.followers.length}/${TRAIL_DEGENERATION_THRESHOLD}`, {
+        pinToScreen(
+          this.add.text(4, 4, `TRAIL SATURATED ${this.followers.length}/${TRAIL_DEGENERATION_THRESHOLD}`, {
             fontSize: "8px",
             color: "#ff6666",
-          })
-          .setScrollFactor(0)
-          .setDepth(999),
+          }),
+        ).setDepth(999),
       );
     }
   }
 
   private handleMovementAndThrow(dt: number): void {
+    if (this.animPreview) {
+      this.driveAnimPreview();
+      return;
+    }
+
     let dir: -1 | 0 | 1 = 0;
-    if (this.cursors.left.isDown) dir = -1;
-    else if (this.cursors.right.isDown) dir = 1;
+    if (this.cursors.left.isDown || touchInput.left) dir = -1;
+    else if (this.cursors.right.isDown || touchInput.right) dir = 1;
     this.emily.handleMovement(dir);
 
     this.throwCooldownRemaining -= dt;
+    // consumeThrow() must be called every frame, not short-circuited behind
+    // the keyboard check — a queued tap that went unread would otherwise sit
+    // there and fire late, on some unrelated later frame.
+    const touchThrew = touchInput.consumeThrow();
+    const throwPressed =
+      Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
+      Phaser.Input.Keyboard.JustDown(this.keyJ) ||
+      touchThrew;
     if (
-      Phaser.Input.Keyboard.JustDown(this.keyJ) &&
+      throwPressed &&
       this.throwCooldownRemaining <= 0 &&
       !this.emily.isFeeding &&
       this.ammo > 0
@@ -308,15 +376,36 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Debug-only (the anim* demos): holds Emily in one animation state so it
+   * can be watched without a key held down. Walking/running is real movement
+   * — she paces a window around where the demo dropped her, so the cycle and
+   * the turn-around flip are both visible — and the throw preview replays
+   * only the animation, without spending ammo or spawning limbs. */
+  private driveAnimPreview(): void {
+    if (this.animPreview === "idle") {
+      this.emily.handleMovement(0);
+      return;
+    }
+    if (this.animPreview === "throw") {
+      this.emily.handleMovement(0);
+      if (!this.emily.isThrowAnimPlaying) this.emily.playThrow();
+      return;
+    }
+    const half = EMILY_SPRITE.previewPaceHalfWidth;
+    if (this.emily.x >= this.animPreviewOriginX + half) this.animPreviewDir = -1;
+    else if (this.emily.x <= this.animPreviewOriginX - half) this.animPreviewDir = 1;
+    this.emily.handleMovement(this.animPreviewDir, EMILY_SPRITE.previewWalkFraction);
+  }
+
   /** The actual throw action — ammo cost, cooldown, and the limb's real
    * launch velocity (LIMB.throwSpeed/throwLift via Limb's constructor),
-   * fired from Emily's current position and facing. The J-key handler
+   * fired from Emily's current position and facing. The ↑-key handler
    * above and the test API's debugThrowLimb() both funnel through this, so
    * a scripted "throw" is the same throw a player would actually make. */
   private throwLimb(): void {
     this.throwCooldownRemaining = LIMB.throwCooldown;
     this.ammo -= 1;
-    this.emily.setAmmoVisual(this.ammo);
+    this.emily.playThrow();
     const offsetX = this.emily.facing * 12;
     const limb = new Limb(this, this.emily.x + offsetX, this.emily.y - 4, this.emily.facing);
     this.limbs.push(limb);
@@ -410,7 +499,10 @@ export class GameScene extends Phaser.Scene {
               // Entrance: arrives from the right edge of the camera's
               // current view, instead of a soldier that was already
               // standing on screen just starting to walk.
-              soldier.setX(this.cameras.main.scrollX + WORLD.width + 20);
+              // worldView, not scrollX: the camera is zoomed (see main.ts),
+              // so scrollX is in screen pixels while worldView is the slice
+              // of the world actually on screen.
+              soldier.setX(this.cameras.main.worldView.right + 20);
               soldier.respondingToCall = true;
               // Head for whatever's actually threatening the caller
               // (almost always Emily, since she's the one who paralyzed
@@ -542,10 +634,11 @@ export class GameScene extends Phaser.Scene {
   private updateFlyingLimbs(): void {
     for (const limb of this.limbs) {
       if (!limb.active || limb.resolved) continue;
-      const landed = limb.y >= WORLD.groundY;
       const offLevel = limb.x < -20 || limb.x > WORLD.levelWidth + 20;
-      if (landed || offLevel) {
-        limb.markResolved();
+      if (limb.hasLanded || offLevel) {
+        // land() snaps it flat on the ground line, so a miss can't come to
+        // rest hanging in the air wherever the physics step left it.
+        limb.land();
         this.groundedLimbs.push(limb);
       }
     }
@@ -568,8 +661,8 @@ export class GameScene extends Phaser.Scene {
   private updateFallingLimbs(): void {
     this.fallingLimbs = this.fallingLimbs.filter((limb) => {
       if (!limb.active) return false;
-      if (limb.y >= WORLD.groundY) {
-        limb.markResolved();
+      if (limb.hasLanded) {
+        limb.land();
         this.groundedLimbs.push(limb);
         return false;
       }
@@ -577,19 +670,27 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** Ammo only returns when Emily actually walks up and touches a dropped
-   * limb — no passive timer. */
+  /** Ammo returns the moment Emily is in contact with a limb that has
+   * finished doing its job — never on a passive timer. "Finished" means it
+   * isn't still embedded in a paralyzed soldier: a limb holding a soldier
+   * down can't be collected, so picking one up can never cut a paralysis
+   * short. The instant that paralysis ends (or the soldier converts), the
+   * limb is fair game — including while it's still falling, so a limb
+   * released by a soldier Emily is already standing on goes straight back to
+   * her instead of making her watch it drop and then step onto it again.
+   * Reach is horizontal-only — see COMBAT.limbPickupRange for why. */
   private handleLimbPickup(): void {
-    this.groundedLimbs = this.groundedLimbs.filter((limb) => {
+    const collect = (limb: Limb): boolean => {
       if (!limb.active) return false;
-      if (Phaser.Math.Distance.Between(this.emily.x, this.emily.y, limb.x, limb.y) <= COMBAT.contactRange) {
-        limb.destroy();
-        this.ammo = Math.min(LIMB.ammoMax, this.ammo + 1);
-        this.emily.setAmmoVisual(this.ammo);
-        return false;
+      if (Math.abs(this.emily.x - limb.x) - limb.displayWidth / 2 > COMBAT.limbPickupRange) {
+        return true;
       }
-      return true;
-    });
+      limb.destroy();
+      this.ammo = Math.min(LIMB.ammoMax, this.ammo + 1);
+      return false;
+    };
+    this.fallingLimbs = this.fallingLimbs.filter(collect);
+    this.groundedLimbs = this.groundedLimbs.filter(collect);
   }
 
   private handleFeed(dt: number): void {
@@ -642,14 +743,14 @@ export class GameScene extends Phaser.Scene {
 
   private showCleared(): void {
     this.isCleared = true;
-    this.add
-      .text(WORLD.width / 2, WORLD.height / 2, "CLEARED — press R", {
-        fontSize: "16px",
-        color: "#ffffff",
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(1001);
+    pinToScreen(
+      this.add
+        .text(WORLD.width / 2, WORLD.height / 2, "CLEARED — press R", {
+          fontSize: "16px",
+          color: "#ffffff",
+        })
+        .setOrigin(0.5),
+    ).setDepth(1001);
   }
 
   /** Spawns a soldier at a fixed offset from Emily's current position —
@@ -687,6 +788,29 @@ export class GameScene extends Phaser.Scene {
       case "reset": {
         break;
       }
+      // The three anim* demos spawn nothing: an empty stretch of level, so
+      // the cycle being previewed is the only thing moving on screen.
+      case "animIdle":
+      case "animWalk":
+      case "animThrow": {
+        this.animPreview = ANIM_PREVIEW_BY_DEMO[name];
+        this.animPreviewOriginX = this.emily.x;
+        this.animPreviewDir = 1;
+        break;
+      }
+      case "artRoster": {
+        // Spread wide enough that the wider figures (the Brute especially)
+        // don't overlap — the point is to see each silhouette whole. They
+        // can't be spread far enough to stop the followers engaging as well:
+        // BRUTE.engageRadius is 200 and the whole screen is only 320 wide, so
+        // this is a look-then-it-fights line-up, not a frozen one.
+        this.spawnSoldierNear(40, "STANDARD");
+        this.spawnSoldierNear(80, "SHIELD");
+        this.spawnSoldierNear(120, "RIFLEMAN");
+        this.spawnFollowerNear(-40, "BASE");
+        this.spawnFollowerNear(-90, "BRUTE");
+        break;
+      }
       case "paralyze": {
         // Within contact range (offset 12 < COMBAT.contactRange 16), so the
         // demo actually proves a paralyzed soldier can't hit Emily back —
@@ -721,13 +845,34 @@ export class GameScene extends Phaser.Scene {
         this.spawnSoldierNear(200);
         break;
       }
+      case "limbMiss": {
+        // The soldier is only there to stop an empty level reading as an
+        // instant win and freezing the scene on CLEARED. At offset 400 it is
+        // far outside the ~175px a throw covers before it hits the floor, so
+        // the throw is still a guaranteed miss and what's on show is purely
+        // where the limb ends up: flat on the ground line, marked, and
+        // pick-up-able.
+        this.spawnSoldierNear(400);
+        this.throwLimb();
+        break;
+      }
+      case "limbAutoPickup": {
+        // ACTIVE, not pre-paralyzed: handleLimbHits ignores an
+        // already-paralyzed soldier, so a limb thrown at one would sail
+        // straight past instead of sticking. Offset 12 is inside
+        // COMBAT.contactRange (16), so Emily is touching the limb the whole
+        // time it's embedded — which is what makes "not collected yet" a
+        // real claim rather than a distance artifact.
+        this.spawnSoldierNear(12);
+        this.throwLimb();
+        break;
+      }
       case "limbDrop": {
         // Ammo spent, as it would be after actually throwing the limb
         // that's now stuck in this soldier — so the drop is the only way
         // to get it back, and "picked up by touch" is a real claim to
         // watch (and to test) rather than a no-op on a full quiver.
         this.ammo = 0;
-        this.emily.setAmmoVisual(this.ammo);
         const s = this.spawnSoldierNear(40);
         s.paralyze();
         const limb = new Limb(this, s.x, s.y - 4, 1);
@@ -854,6 +999,8 @@ export class GameScene extends Phaser.Scene {
       fallingLimbs: this.fallingLimbs,
       groundedLimbs: this.groundedLimbs,
       limbs: this.limbs,
+      backgroundLayers: this.background.debugOffsets,
+      cameraWorldX: this.cameras.main.worldView.x,
     };
   }
 
@@ -868,7 +1015,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Test/demo support: performs Emily's actual throw — same ammo cost,
-   * cooldown, and launch velocity a J-press would produce — instead of
+   * cooldown, and launch velocity an ↑-press would produce — instead of
    * conjuring a limb with an arbitrary velocity. Use this whenever what's
    * being tested is the throw mechanic itself, not just "a limb arriving
    * from some direction." */

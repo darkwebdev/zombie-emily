@@ -1,8 +1,9 @@
 import Phaser from "phaser";
-import { DEMOS, DemoName } from "./demos";
+import { DEMOS, DEMO_GROUPS, DemoName, UNGROUPED_DEMO } from "./demos";
 import { runAllTests, RunResult } from "./TestRunner";
 import { TESTS, Check } from "./tests";
 import type { GameScene } from "../scenes/GameScene";
+import { hitboxesEnabled, setHitboxes } from "./hitboxes";
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -23,6 +24,11 @@ interface RunsDemos {
  * driving the game to reach it. Debug-only — only mounted when ?debug=1 is
  * present. */
 export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
+  // Debug-only handle for driving the running game from a devtools console or
+  // a CDP script. The project verifies behaviour in a live browser rather than
+  // only through tsc, and without this there's no way to read the scene from
+  // outside — Phaser keeps no global registry of game instances.
+  (window as unknown as { __game?: Phaser.Game }).__game = game;
   const info = document.createElement("div");
   info.style.cssText = [
     "position:fixed",
@@ -59,6 +65,11 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
     "gap:6px",
     "z-index:1000",
     "font-family:monospace",
+    // The tree is taller than the viewport once a couple of branches are
+    // open, so the panel scrolls rather than running off the bottom.
+    "max-height:calc(100vh - 80px)",
+    "overflow-y:auto",
+    "width:190px",
   ].join(";");
 
   const results = document.createElement("div");
@@ -227,6 +238,32 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
     }
   }
 
+  // Arcade Physics' body outlines, off by default — see debug/hitboxes.ts.
+  const hitboxBtn = document.createElement("button");
+  const hitboxStyle = (on: boolean): void => {
+    hitboxBtn.textContent = `${on ? "\u2611" : "\u2610"} Hitboxes`;
+    hitboxBtn.style.background = on ? "#1a2a4a" : "#222";
+    hitboxBtn.style.borderColor = on ? "#4a7aca" : "#555";
+  };
+  hitboxBtn.style.cssText = [
+    "padding:6px 10px",
+    "color:#fff",
+    "border:1px solid #555",
+    "border-radius:4px",
+    "cursor:pointer",
+    "font-size:12px",
+    "font-family:monospace",
+    "text-align:left",
+  ].join(";");
+  hitboxStyle(hitboxesEnabled());
+  hitboxBtn.addEventListener("click", () => {
+    const scene = game.scene.getScene(sceneKey);
+    setHitboxes(scene, !hitboxesEnabled());
+    hitboxStyle(hitboxesEnabled());
+    hitboxBtn.blur();
+  });
+  panel.appendChild(hitboxBtn);
+
   const testBtn = document.createElement("button");
   testBtn.textContent = "▶ Run All Tests";
   testBtn.style.cssText = [
@@ -256,7 +293,10 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
   });
   panel.appendChild(testBtn);
 
-  for (const demo of DEMOS) {
+  /** Every demo button, whatever branch it lives in — built once here so the
+   * styling and the click behaviour can't drift between the standalone
+   * "Reset" button and the ones inside the tree. */
+  const demoButton = (demo: (typeof DEMOS)[number], indented: boolean): HTMLButtonElement => {
     const btn = document.createElement("button");
     btn.textContent = demo.label;
     btn.style.cssText = [
@@ -269,6 +309,7 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
       "font-size:12px",
       "font-family:monospace",
       "text-align:left",
+      indented ? "margin-left:12px" : "",
     ].join(";");
     btn.addEventListener("mouseenter", () => (btn.style.background = "#2a2a4a"));
     btn.addEventListener("mouseleave", () => (btn.style.background = "#1a1a2e"));
@@ -278,7 +319,48 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
       // swallowed as a synthetic click on this button afterward.
       btn.blur();
     });
-    panel.appendChild(btn);
+    return btn;
+  };
+
+  panel.appendChild(demoButton(DEMOS.find((d) => d.name === UNGROUPED_DEMO)!, false));
+
+  // One collapsible branch per group. Expansion state lives in the DOM and
+  // the panel is mounted once per page load, so a branch stays open across
+  // the scene.restart() that running a demo triggers.
+  for (const group of DEMO_GROUPS) {
+    const children = document.createElement("div");
+    children.style.cssText = ["display:none", "flex-direction:column", "gap:6px"].join(";");
+
+    const header = document.createElement("button");
+    const setOpen = (open: boolean): void => {
+      children.style.display = open ? "flex" : "none";
+      header.textContent = `${open ? "▾" : "▸"} ${group.label}`;
+    };
+    header.style.cssText = [
+      "padding:6px 10px",
+      "background:#141422",
+      "color:#cfcfe6",
+      "border:1px solid #444",
+      "border-radius:4px",
+      "cursor:pointer",
+      "font-size:12px",
+      "font-family:monospace",
+      "text-align:left",
+      "font-weight:bold",
+    ].join(";");
+    setOpen(false);
+    header.addEventListener("mouseenter", () => (header.style.background = "#222238"));
+    header.addEventListener("mouseleave", () => (header.style.background = "#141422"));
+    header.addEventListener("click", () => {
+      setOpen(children.style.display === "none");
+      header.blur();
+    });
+
+    for (const name of group.demos) {
+      children.appendChild(demoButton(DEMOS.find((d) => d.name === name)!, true));
+    }
+    panel.appendChild(header);
+    panel.appendChild(children);
   }
 
   document.body.appendChild(panel);

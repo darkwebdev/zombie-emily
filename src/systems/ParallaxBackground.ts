@@ -1,119 +1,80 @@
 import Phaser from "phaser";
-import { WORLD } from "../config/tuning";
+import { BACKGROUND, WORLD } from "../config/tuning";
+import { pinToScreen } from "./screenPin";
+import farUrl from "../assets/bg-far.png";
+import midUrl from "../assets/bg-mid.png";
+import fenceUrl from "../assets/bg-fence.png";
+import groundUrl from "../assets/bg-ground.png";
 
-const MOUNTAIN_TEX = "bg_mountains";
-const TREE_TEX = "bg_trees";
+const URLS: Record<string, string> = {
+  "bg-far": farUrl,
+  "bg-mid": midUrl,
+  "bg-fence": fenceUrl,
+  "bg-ground": groundUrl,
+};
 
-// Lower = appears further away (moves less per pixel of camera scroll).
-const MOUNTAIN_PARALLAX = 0.2;
-const TREE_PARALLAX = 0.45;
+/** The parallax layers cut from the environment board by
+ * tools/extract_background.py, back to front, each scrolling at its own
+ * fraction of camera speed — the standard side-scroller depth trick.
+ *
+ * Every layer is a TileSprite pinned to the screen (scrollFactor 0) at the
+ * full viewport width, with its texture *offset* driven from the camera each
+ * frame rather than the sprite being moved. That's what lets a 320px-wide
+ * object cover a 3200px level without ever running out of coverage — and
+ * it's why the street (parallax 1) is a screen-pinned tile too, rather than
+ * one enormous level-wide image. */
+export class ParallaxBackground {
+  // The configured key is kept alongside the sprite because a TileSprite's
+  // own `texture` is the internal canvas fill-pattern Phaser builds for it
+  // (its key is a generated UUID), not the source image.
+  private layers: { key: string; sprite: Phaser.GameObjects.TileSprite; parallax: number; artScale: number }[] = [];
 
-function drawRidge(g: Phaser.GameObjects.Graphics, w: number, h: number, peaks: [number, number][]): void {
-  g.beginPath();
-  g.moveTo(0, h);
-  for (const [x, y] of peaks) g.lineTo(x, y);
-  g.lineTo(w, h);
-  g.closePath();
-  g.fillPath();
-}
 
-function ensureMountainTexture(scene: Phaser.Scene): void {
-  if (scene.textures.exists(MOUNTAIN_TEX)) return;
-  const w = 480;
-  const h = 150;
-  const g = scene.add.graphics();
-
-  // Back range: darker, taller, sparser peaks.
-  g.fillStyle(0x1b2030, 1);
-  drawRidge(g, w, h, [
-    [0, 80],
-    [70, 25],
-    [140, 90],
-    [210, 40],
-    [280, 100],
-    [350, 30],
-    [420, 85],
-    [480, 45],
-  ]);
-
-  // Front range: lighter, shorter, offset so the repeat doesn't line up
-  // with the back range and read as obviously tiled.
-  g.fillStyle(0x242b40, 1);
-  drawRidge(g, w, h, [
-    [0, 120],
-    [50, 80],
-    [120, 130],
-    [190, 90],
-    [260, 135],
-    [330, 95],
-    [400, 128],
-    [480, 100],
-  ]);
-
-  g.generateTexture(MOUNTAIN_TEX, w, h);
-  g.destroy();
-}
-
-function ensureTreeTexture(scene: Phaser.Scene): void {
-  if (scene.textures.exists(TREE_TEX)) return;
-  const w = 240;
-  const h = 60;
-  const g = scene.add.graphics();
-  g.fillStyle(0x11151d, 1);
-
-  const trees: [number, number][] = [
-    [10, 42],
-    [45, 52],
-    [80, 36],
-    [120, 48],
-    [155, 40],
-    [190, 50],
-    [220, 34],
-  ];
-  for (const [x, size] of trees) {
-    g.fillRect(x - 1, h - 10, 2, 10); // trunk
-    g.beginPath();
-    g.moveTo(x - size * 0.35, h - 8);
-    g.lineTo(x, h - 8 - size);
-    g.lineTo(x + size * 0.35, h - 8);
-    g.closePath();
-    g.fillPath();
+  /** What each layer has actually been scrolled to, for the debug suite —
+   * the parallax rates are otherwise invisible to anything but the eye, and
+   * they have silently broken once already (camera.scrollX is in screen
+   * pixels once the camera is zoomed, which made every layer scroll 3x too
+   * fast). */
+  get debugOffsets(): { key: string; tilePositionX: number; parallax: number; artScale: number }[] {
+    return this.layers.map((l) => ({
+      key: l.key,
+      tilePositionX: l.sprite.tilePositionX,
+      parallax: l.parallax,
+      artScale: l.artScale,
+    }));
   }
 
-  g.generateTexture(TREE_TEX, w, h);
-  g.destroy();
-}
-
-/** Two tileable silhouette layers scrolling at different rates relative to
- * the camera — the standard side-scroller parallax trick. Both TileSprites
- * are pinned to the screen (scrollFactor 0) at the full viewport width, and
- * their texture offset is driven from camera.scrollX each frame instead of
- * moving the sprites themselves, so they never run out of coverage no
- * matter how wide the level is. */
-export class ParallaxBackground {
-  private mountains: Phaser.GameObjects.TileSprite;
-  private trees: Phaser.GameObjects.TileSprite;
+  /** Call from the scene's preload(). */
+  static preload(scene: Phaser.Scene): void {
+    for (const layer of BACKGROUND.layers) {
+      scene.load.image(layer.key, URLS[layer.key]);
+    }
+  }
 
   constructor(scene: Phaser.Scene) {
-    ensureMountainTexture(scene);
-    ensureTreeTexture(scene);
-
-    this.mountains = scene.add
-      .tileSprite(0, 0, WORLD.width, 150, MOUNTAIN_TEX)
-      .setOrigin(0, 0)
-      .setScrollFactor(0)
-      .setDepth(-100);
-
-    const treeY = WORLD.groundY + 14 - 60;
-    this.trees = scene.add
-      .tileSprite(0, treeY, WORLD.width, 60, TREE_TEX)
-      .setOrigin(0, 0)
-      .setScrollFactor(0)
-      .setDepth(-90);
+    for (const layer of BACKGROUND.layers) {
+      const height = scene.textures.get(layer.key).getSourceImage().height / layer.artScale;
+      const sprite = pinToScreen(
+        scene.add.tileSprite(0, layer.y, WORLD.width, height, layer.key).setOrigin(0, 0),
+      ).setDepth(layer.depth);
+      // The texture is artScale times denser than the world, so the tiling
+      // has to shrink to match; without this a 3x-scale layer would draw a
+      // third of itself blown up across the screen.
+      sprite.setTileScale(1 / layer.artScale, 1 / layer.artScale);
+      this.layers.push({ key: layer.key, sprite, parallax: layer.parallax, artScale: layer.artScale });
+    }
   }
 
+  /** cameraScrollX is the world x of the camera's left edge
+   * (camera.worldView.x) — world units, so the parallax rates stay in the
+   * same units they were tuned in regardless of camera zoom. */
   update(cameraScrollX: number): void {
-    this.mountains.tilePositionX = cameraScrollX * MOUNTAIN_PARALLAX;
-    this.trees.tilePositionX = cameraScrollX * TREE_PARALLAX;
+    for (const { sprite, parallax, artScale } of this.layers) {
+      // Phaser shifts a TileSprite by tilePositionX * tileScaleX (see
+      // TileSpriteWebGLRenderer), so a tileScale of 1/artScale means the
+      // offset has to be expressed in texture pixels to land on the world
+      // pixels actually wanted.
+      sprite.tilePositionX = cameraScrollX * parallax * artScale;
+    }
   }
 }

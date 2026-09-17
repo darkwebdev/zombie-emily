@@ -7,6 +7,30 @@ export const DEMOS = [
     description: "Restarts the scene to a clean initial state.",
   },
   {
+    name: "animIdle",
+    label: "Anim: Idle",
+    description:
+      "Emily alone on an empty stretch of level, standing still — just the idle cycle. Her ammo reads out on the top-of-screen HUD, not on her.",
+  },
+  {
+    name: "animWalk",
+    label: "Anim: Walk",
+    description:
+      "Walks Emily at her real arrow-key speed (EMILY.speed), pacing a window around where she started — watch the cycle, and the sprite flipping when she turns. Walk is her only locomotion cycle.",
+  },
+  {
+    name: "animThrow",
+    label: "Anim: Throw",
+    description:
+      "Replays the one-shot throw animation on a loop, standing still. Cosmetic only — no ammo is spent and no limb is spawned, so the cycle can be watched as long as you like.",
+  },
+  {
+    name: "artRoster",
+    label: "Art: Roster",
+    description:
+      "One of every enemy and follower kind lined up beside Emily, all ACTIVE and untinted, so the art can be compared at the scale it actually plays at. Also the guard on the art not moving anything: every figure's feet sit on the ground line and every hitbox is still the exact world box its old rectangle was.",
+  },
+  {
     name: "paralyze",
     label: "Paralyze",
     description:
@@ -34,6 +58,18 @@ export const DEMOS = [
     name: "aggroReady",
     label: "Aggro Ready",
     description: "Gives Emily two followers and a full aggro meter — press Space to trigger the horde rush.",
+  },
+  {
+    name: "limbMiss",
+    label: "Limb Miss",
+    description:
+      "Emily throws into an empty stretch of level with nothing to hit, so the limb arcs down and settles flat on the ground line — plus the overhead down-arrow marker that shows where every thrown limb is.",
+  },
+  {
+    name: "limbAutoPickup",
+    label: "Limb Auto-Pickup",
+    description:
+      "Emily throws point-blank at an active soldier, so the limb sticks in it while she's touching both. It stays out of reach while it's holding the soldier paralyzed, then drops straight back into her hand the moment the conversion ends it — no walking back over it.",
   },
   {
     name: "limbDrop",
@@ -118,3 +154,62 @@ export const DEMOS = [
 ] as const;
 
 export type DemoName = (typeof DEMOS)[number]["name"];
+
+/** The panel renders these as collapsible branches rather than one flat
+ * column of ~20 buttons — with every demo visible at once, finding the one
+ * you want meant reading every label. Order here is the order on screen.
+ *
+ * "reset" is deliberately absent: it's the clean-slate action rather than a
+ * scenario, so the panel keeps it as a top-level button next to the test
+ * runner. Every other demo must appear in exactly one branch — the assertion
+ * below fails loudly at import time if a newly added demo is left out. */
+export const DEMO_GROUPS = [
+  {
+    label: "Animation",
+    demos: ["animIdle", "animWalk", "animThrow", "artRoster"],
+  },
+  {
+    label: "Core loop",
+    demos: ["paralyze", "recovering", "feed", "defenseless"],
+  },
+  {
+    label: "Limbs & ammo",
+    demos: ["limbMiss", "limbAutoPickup", "limbDrop"],
+  },
+  {
+    label: "Horde & aggro",
+    demos: ["aggroReady", "uncappedHorde"],
+  },
+  {
+    label: "Fusion & Brutes",
+    demos: ["fusionAuto", "fusionViaCombat", "bruteExecute", "bruteVsGunner"],
+  },
+  {
+    label: "Shield Troopers",
+    demos: ["shieldBlock", "shieldFlank"],
+  },
+  {
+    label: "Riflemen",
+    demos: ["gunnerShot", "gunnerBlock", "gunnerRush", "callForHelp"],
+  },
+  {
+    label: "Run end states",
+    demos: ["death", "cleared"],
+  },
+] as const satisfies readonly { label: string; demos: readonly DemoName[] }[];
+
+/** The standalone button above the branches — see DEMO_GROUPS. */
+export const UNGROUPED_DEMO: DemoName = "reset";
+
+{
+  const grouped = DEMO_GROUPS.flatMap((g) => g.demos as readonly DemoName[]);
+  const missing = DEMOS.map((d) => d.name).filter(
+    (n) => n !== UNGROUPED_DEMO && !grouped.includes(n),
+  );
+  const duplicated = grouped.filter((n, i) => grouped.indexOf(n) !== i);
+  if (missing.length || duplicated.length) {
+    throw new Error(
+      `DEMO_GROUPS out of sync with DEMOS — ungrouped: [${missing}], duplicated: [${duplicated}]`,
+    );
+  }
+}

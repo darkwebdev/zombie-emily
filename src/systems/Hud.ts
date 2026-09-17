@@ -1,19 +1,27 @@
 import Phaser from "phaser";
-import { AGGRO } from "../config/tuning";
+import { AGGRO, HUD, LIMB } from "../config/tuning";
+import { pinToScreen } from "./screenPin";
 
-/** Fixed top-left panel: HP bar, aggro bar, horde count. See
- * docs/FIRST_BUILD.md §2. */
+/** Fixed top-left panel: HP bar, aggro bar, horde count, ammo. See
+ * docs/FIRST_BUILD.md §2.
+ *
+ * Ammo lives here rather than above Emily's head: a readout that follows the
+ * character moves around the screen while you play, so checking it costs a
+ * saccade to wherever she happens to be. Every other resource the player
+ * tracks is already on this panel, so ammo belongs on the same line of sight. */
 export class Hud {
   private gfx: Phaser.GameObjects.Graphics;
   private hordeText: Phaser.GameObjects.Text;
   private pulseT = 0;
 
   constructor(scene: Phaser.Scene) {
-    this.gfx = scene.add.graphics().setScrollFactor(0).setDepth(1000);
-    this.hordeText = scene.add
-      .text(16, 58, "HORDE 0", { fontSize: "12px", color: "#ffffff" })
-      .setScrollFactor(0)
-      .setDepth(1000);
+    this.gfx = pinToScreen(scene.add.graphics()).setDepth(1000);
+    this.hordeText = pinToScreen(
+      scene.add.text(16, 58, "HORDE 0", { fontSize: "12px", color: "#ffffff" }),
+    ).setDepth(1000);
+    pinToScreen(
+      scene.add.text(HUD.ammoLabelX, 58, "AMMO", { fontSize: "12px", color: "#ffffff" }),
+    ).setDepth(1000);
   }
 
   update(
@@ -25,6 +33,7 @@ export class Hud {
     rejectFlashRemaining: number,
     hordeCount: number,
     bruteCount: number,
+    ammo: number,
   ): void {
     this.pulseT += dt;
     const g = this.gfx;
@@ -57,6 +66,17 @@ export class Hud {
     }
     g.lineStyle(1, 0x000000, 1);
     g.strokeRect(16, 42, 220, 10);
+
+    // Ammo pips: one per limb she could be carrying, filled while carried and
+    // hollow once thrown, so the capacity is readable at a glance rather than
+    // having to remember what the maximum is.
+    for (let i = 0; i < LIMB.ammoMax; i += 1) {
+      const x = HUD.ammoPipX + i * (HUD.ammoPipWidth + HUD.ammoPipGap);
+      g.fillStyle(i < ammo ? HUD.ammoPipColor : HUD.ammoPipEmptyColor, 1);
+      g.fillRect(x, HUD.ammoPipY, HUD.ammoPipWidth, HUD.ammoPipHeight);
+      g.lineStyle(1, 0x000000, 1);
+      g.strokeRect(x, HUD.ammoPipY, HUD.ammoPipWidth, HUD.ammoPipHeight);
+    }
 
     const bruteSuffix = bruteCount > 0 ? ` (${bruteCount} BRUTE)` : "";
     this.hordeText.setText(`HORDE ${hordeCount}${bruteSuffix}`);

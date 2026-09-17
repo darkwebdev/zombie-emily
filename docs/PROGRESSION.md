@@ -57,9 +57,9 @@ targets the same oldest sample and piles up at one x.** That is the genuine
 limit (higher for tighter-spacing kinds — a Brute uses 4). It belongs in the
 codebase as a **documented threshold and a diagnostic, not a mechanic.**
 
-**Legibility fails earlier than that, and harmlessly.** At `EMILY.speed` 140
-each rank sits ~50px behind the last (6 samples × 60ms × 140), and the
-viewport is `WORLD.width` 320 with Emily centered — so **only about three
+**Legibility fails earlier than that, and harmlessly.** At `EMILY.speed` 95
+each rank sits ~34px behind the last (6 samples × 60ms × 95), and the
+viewport is `WORLD.width` 320 with Emily centered — so **only about four
 followers are on screen at all while she is moving.** The conga line is
 already mostly off-camera. An unbounded horde is not a visual problem; it is
 an invisible one. (When she stops they bunch at her position and all become

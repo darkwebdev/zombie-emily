@@ -1,21 +1,21 @@
 import Phaser from "phaser";
 import { ENEMY_STATS, EnemyKind, SHIELD_FLASH_DURATION, SOLDIER } from "../config/tuning";
+import { CHARACTER_TEXTURE, applyCharacterArt } from "./characterArt";
 
-const TEXTURE_KEY = "soldier";
-const SHIELD_TEXTURE_KEY = "soldier_shield";
-const RIFLE_TEXTURE_KEY = "soldier_rifle";
-const BASE_TINT: Record<EnemyKind, number> = {
-  STANDARD: 0x5a5a3c,
-  SHIELD: 0x6c7a89,
-  RIFLEMAN: 0x9c5a3c,
-};
+// The art is already coloured per kind, so the base "tint" is white: no tint
+// at all. The state tints below still multiply over it, which is the whole
+// reason they survived the switch from flat rectangles to real art.
+const BASE_TINT = 0xffffff;
 const PARALYZED_TINT = 0x2bff5e;
 const RECOVERING_TINT = 0xffb433;
 const CONVERTING_TINT = 0x1fae46;
 const BLOCK_FLASH_TINT = 0xffffff;
-const SHIELD_BAR_COLOR = 0xc8d4e0;
-const BARREL_COLOR = 0x3a3a3a;
-const BARREL_AIM_COLOR = 0xff3b30;
+// The Rifleman's windup tell. It used to be a small rectangle standing in for
+// the gun barrel, drawn beside a flat rectangle body; the art draws an actual
+// rifle, so a second floating barrel beside it read as debris. Tinting the
+// whole figure is both unmissable and impossible to misplace, and it's free:
+// ACTIVE is the one state with no tint of its own.
+const AIM_TINT = 0xff3b30;
 
 export type SoldierState = "ACTIVE" | "PARALYZED" | "RECOVERING" | "CONVERTING";
 
@@ -45,55 +45,24 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
   private paralyzeRemaining = 0;
   private recoveringRemaining = 0;
   private shieldFlashRemaining = 0;
-  private shieldBar: Phaser.GameObjects.Rectangle | null = null;
-  private barrel: Phaser.GameObjects.Rectangle | null = null;
-
-  static ensureTexture(scene: Phaser.Scene): void {
-    if (!scene.textures.exists(TEXTURE_KEY)) {
-      const g = scene.add.graphics();
-      g.fillStyle(0xffffff, 1);
-      g.fillRect(0, 0, 12, 28);
-      g.generateTexture(TEXTURE_KEY, 12, 28);
-      g.destroy();
-    }
-    if (!scene.textures.exists(SHIELD_TEXTURE_KEY)) {
-      const g = scene.add.graphics();
-      g.fillStyle(0xffffff, 1);
-      g.fillRect(0, 0, 16, 28);
-      g.generateTexture(SHIELD_TEXTURE_KEY, 16, 28);
-      g.destroy();
-    }
-    if (!scene.textures.exists(RIFLE_TEXTURE_KEY)) {
-      const g = scene.add.graphics();
-      g.fillStyle(0xffffff, 1);
-      g.fillRect(0, 0, 10, 28);
-      g.generateTexture(RIFLE_TEXTURE_KEY, 10, 28);
-      g.destroy();
-    }
-  }
 
   constructor(scene: Phaser.Scene, x: number, y: number, kind: EnemyKind = "STANDARD", facing: 1 | -1 = -1) {
-    Soldier.ensureTexture(scene);
     const stats = ENEMY_STATS[kind];
-    const textureKey = stats.shielded ? SHIELD_TEXTURE_KEY : stats.fireRange > 0 ? RIFLE_TEXTURE_KEY : TEXTURE_KEY;
-    super(scene, x, y, textureKey);
+    super(scene, x, y, CHARACTER_TEXTURE[kind]);
     scene.add.existing(this);
     scene.physics.add.existing(this);
     (this.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
     (this.body as Phaser.Physics.Arcade.Body).setImmovable(true);
+    applyCharacterArt(this, kind);
 
     this.kind = kind;
     this.stats = stats;
     this.hp = stats.hp;
     this.facing = facing;
-    this.setTint(BASE_TINT[kind]);
-
-    if (stats.shielded) {
-      this.shieldBar = scene.add.rectangle(x + facing * 9, y - 2, 3, 20, SHIELD_BAR_COLOR);
-    }
-    if (stats.fireRange > 0) {
-      this.barrel = scene.add.rectangle(x + facing * 8, y - 6, 8, 3, BARREL_COLOR);
-    }
+    // The figures are drawn facing right, so a left-facing soldier is the
+    // mirrored one — this is also what keeps the shield trooper's shield on
+    // the side it is actually blocking from (see deflectsLimb).
+    this.setFlipX(facing === -1);
   }
 
   get isParalyzed(): boolean {
@@ -114,6 +83,7 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
 
   faceToward(targetX: number): void {
     this.facing = targetX < this.x ? -1 : 1;
+    this.setFlipX(this.facing === -1);
   }
 
   /** True if a limb flying with this X velocity would hit the shielded
@@ -204,25 +174,18 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
   update(dt: number): void {
     if (this.contactCooldownRemaining > 0) this.contactCooldownRemaining -= dt;
 
-    if (this.shieldBar) {
-      this.shieldBar.setPosition(this.x + this.facing * 9, this.y - 2);
-      // Hidden during RECOVERING/CONVERTING — the guard is down, and the
-      // missing bar is the only signal the front is open.
-      this.shieldBar.setVisible(this.state === "ACTIVE" || this.state === "PARALYZED");
-    }
-
-    if (this.barrel) {
-      const dir = this.isAiming ? this.lockedAimDir : this.facing;
-      this.barrel.setPosition(this.x + dir * 8, this.y - 6);
-      this.barrel.setFillStyle(this.isAiming ? BARREL_AIM_COLOR : BARREL_COLOR);
-    }
-
+    // The shield is part of the art now, and flipX keeps it on the side this
+    // soldier actually blocks from. "Guard down" during RECOVERING is carried
+    // by RECOVERING_TINT, which is why no separate shield bar is drawn.
     if (this.shieldFlashRemaining > 0 && this.state === "ACTIVE") {
       this.shieldFlashRemaining -= dt;
-      this.setTint(this.shieldFlashRemaining > 0 ? BLOCK_FLASH_TINT : BASE_TINT[this.kind]);
+      this.setTint(this.shieldFlashRemaining > 0 ? BLOCK_FLASH_TINT : BASE_TINT);
     }
 
-    if (this.isRanged && this.state === "ACTIVE") this.tickWeapon(dt);
+    if (this.isRanged && this.state === "ACTIVE") {
+      this.tickWeapon(dt);
+      if (this.shieldFlashRemaining <= 0) this.setTint(this.isAiming ? AIM_TINT : BASE_TINT);
+    }
 
     if (this.state === "PARALYZED") {
       this.paralyzeRemaining -= dt;
@@ -238,14 +201,9 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
       this.recoveringRemaining -= dt;
       if (this.recoveringRemaining <= 0) {
         this.state = "ACTIVE";
-        this.setTint(BASE_TINT[this.kind]);
+        this.setTint(BASE_TINT);
       }
     }
   }
 
-  destroy(fromScene?: boolean): void {
-    this.shieldBar?.destroy();
-    this.barrel?.destroy();
-    super.destroy(fromScene);
-  }
 }
