@@ -339,6 +339,55 @@ export const COMBAT = {
 // further follower the same oldest sample and they pile up at one x.
 // It's a diagnostic threshold (see the ?debug=1 warning in GameScene),
 // not a cap to enforce — don't reintroduce a headcount limit.
+// How the horde is spread out so it can actually be counted. Followers used
+// to share one ground line and had no depth sorting at all, so a cluster of
+// them merged into a single silhouette and the player couldn't read their own
+// horde size. Each follower now stands a few pixels nearer or further down
+// the street, and characters draw front-to-back by that line.
+//
+// The offsets are a fixed scrambled table indexed by a per-follower seed, not
+// Math.random(): the debug suite asserts against the live scene, so a value
+// re-rolled every run would make position-sensitive tests flaky. It's also
+// deliberately NOT derived from `rank` — rank shifts down when a follower
+// ahead dies or fuses, which would make everyone behind it pop vertically.
+//
+// The band is tiny on purpose. It has to stay small enough that the depths it
+// produces sit below LIMB.marker.depth (50) and above the background layers
+// (-70 and back), and small enough not to matter to contact geometry:
+// CombatSystem measures centre-to-centre, so an offset of dy shrinks a
+// follower's horizontal reach to sqrt(reach^2 - dy^2) — worst case 0.51px for
+// a base follower and 1.67px for a Brute (which already fights 4px off a
+// soldier's line today because of its spawnYOffset).
+export const HORDE_SPREAD = {
+  /** Vertical half-range, world px. */
+  yBand: 4,
+  /** Indexed by the follower's seed. Scrambled rather than sequential so
+   * consecutive spawns don't line up into a visible staircase. */
+  offsets: [0, 3, -2, 4, -4, 2, -3, 1, -1, 3],
+  /** Horizontal offsets, world px, applied to the trail-follow target only —
+   * a rushing or engaging follower converges on the soldier's real x instead,
+   * so ganging up on a target isn't degraded by jitter.
+   *
+   * These have to be comparable to a figure's *width* (a base follower is
+   * ~22px wide, a Brute ~31px) to do anything: the first attempt used ±4 and
+   * a stopped horde still drew as one blob, because the whole line collapses
+   * onto the leader's x the moment she stops and 4px of scatter is a fifth of
+   * a body. This is what actually makes a resting horde countable; the
+   * vertical band above is what keeps the figures from occluding each other
+   * where they do still overlap.
+   *
+   * A different length to `offsets` on purpose, and coprime with it, so the
+   * two tables don't cycle in lockstep — 7 x 10 gives 70 distinct positions
+   * before any two followers can land on the same spot. */
+  xOffsets: [0, 13, -7, 20, -17, 6, -13],
+};
+
+/** Draw depth for thrown limbs and bullets. Characters sit in the depth band
+ * HORDE_SPREAD puts them in ([-4, +4]), so a projectile left at the default 0
+ * would be swallowed by any follower standing a pixel nearer the camera.
+ * Above the whole band, below LIMB.marker.depth (50). */
+export const PROJECTILE_DEPTH = 10;
+
 export const TRAIL = {
   sampleIntervalMs: 60,
   bufferSize: 120,

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { PROJECTILE_DEPTH } from "../config/tuning";
 
 const TEXTURE_KEY = "bullet";
 
@@ -32,5 +33,6 @@ export class Bullet extends Phaser.Physics.Arcade.Sprite {
     this.range = range;
     this.spawnX = x;
     this.prevX = x;
+    this.setDepth(PROJECTILE_DEPTH);
   }
 }

@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { EMILY_SPRITE, GROUND_LINE, LIMB } from "../config/tuning";
+import { EMILY_SPRITE, GROUND_LINE, LIMB, PROJECTILE_DEPTH } from "../config/tuning";
 import armUrl from "../assets/emily-arm.png";
 
 /** Emily's severed arm, cut from the character board's ATTACK row by
@@ -53,6 +53,7 @@ export class Limb extends Phaser.Physics.Arcade.Sprite {
     body.setAllowGravity(true);
     body.setGravityY(LIMB.gravityY);
     this.setVelocity(facing * LIMB.throwSpeed, -LIMB.throwLift);
+    this.setDepth(PROJECTILE_DEPTH);
     this.marker = scene.add
       .image(x, LIMB.marker.y, LIMB_MARKER_TEXTURE)
       .setDepth(LIMB.marker.depth);

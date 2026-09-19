@@ -71,6 +71,7 @@ export class GameScene extends Phaser.Scene {
   private keyR!: Phaser.Input.Keyboard.Key;
   private throwCooldownRemaining = 0;
   private ammo = LIMB.ammoMax;
+  private followerSpawnSeq = 0;
 
   private feedProgress = 0;
   private feedBar!: Phaser.GameObjects.Graphics;
@@ -113,6 +114,7 @@ export class GameScene extends Phaser.Scene {
     touchInput.reset();
     this.debugMode = new URLSearchParams(location.search).has("debug");
     this.ammo = LIMB.ammoMax;
+    this.followerSpawnSeq = 0;
     this.soldiers = [];
     this.followers = [];
     this.limbs = [];
@@ -229,7 +231,7 @@ export class GameScene extends Phaser.Scene {
         // Emily's own position moves past where it's standing.
         if (!f.hasJoined) f.checkJoined(this.emily.x, this.emily.facing);
         if (f.hasJoined) {
-          f.followTarget(this.trail.targetXForOffset(trailOffset));
+          f.followTarget(this.trail.targetXForOffset(trailOffset) + f.xJitter);
         } else {
           f.setVelocityX(0);
         }
@@ -564,8 +566,16 @@ export class GameScene extends Phaser.Scene {
   private finishConversion(soldier: Soldier): void {
     this.soldiers = this.soldiers.filter((s) => s !== soldier);
     const rank = this.followers.length;
-    this.followers.push(new Follower(this, soldier.x, soldier.y, rank));
+    this.followers.push(new Follower(this, soldier.x, soldier.y, rank, "BASE", this.nextFollowerSeed()));
     soldier.destroy();
+  }
+
+  /** Per-run, per-follower seed for the depth band (see HORDE_SPREAD). Scene
+   * state rather than a module static on purpose: every demo button restarts
+   * the scene, and a counter that carried across restarts would hand the same
+   * scenario different offsets on each run and make the tests unreproducible. */
+  private nextFollowerSeed(): number {
+    return this.followerSpawnSeq++;
   }
 
   private removeFollower(dead: Follower): void {
@@ -595,7 +605,6 @@ export class GameScene extends Phaser.Scene {
 
       const consumed = base.slice(0, FUSION.requiredBase);
       const spawnX = consumed.reduce((sum, f) => sum + f.x, 0) / consumed.length;
-      const spawnY = consumed.reduce((sum, f) => sum + f.y, 0) / consumed.length;
       // If any consumed follower had already joined the trail, the Brute
       // inherits that — it's a continuation of already-moving followers,
       // not a fresh spawn that should freeze and wait for Emily again.
@@ -603,7 +612,10 @@ export class GameScene extends Phaser.Scene {
 
       consumed.forEach((f) => this.removeFollower(f));
 
-      const brute = new Follower(this, spawnX, spawnY, 0, "BRUTE");
+      // Canonical ground Y, deliberately not the average of the consumed
+      // followers' y — that average already contains their depth offsets, and
+      // the Brute is a new figure that gets its own spot in the band.
+      const brute = new Follower(this, spawnX, WORLD.groundY, 0, "BRUTE", this.nextFollowerSeed());
       brute.hasJoined = alreadyJoined;
       this.insertFollowerAtFront(brute);
     }
@@ -766,7 +778,7 @@ export class GameScene extends Phaser.Scene {
    * it from. */
   private spawnFollowerNear(offsetX: number, kind: FollowerKind = "BASE"): Follower {
     const rank = this.followers.length;
-    const f = new Follower(this, this.emily.x + offsetX, WORLD.groundY, rank, kind);
+    const f = new Follower(this, this.emily.x + offsetX, WORLD.groundY, rank, kind, this.nextFollowerSeed());
     this.followers.push(f);
     return f;
   }
@@ -890,6 +902,21 @@ export class GameScene extends Phaser.Scene {
         // Emily needed to reach the conversion.
         for (let i = 0; i < 4; i++) this.spawnFollowerNear(-40 - i * 24, "BRUTE");
         this.spawnSoldierNear(40).paralyze();
+        break;
+      }
+      case "hordeSpread": {
+        // Deliberately tighter than trailSpacing would ever leave them: this
+        // is the stopped-and-bunched case, which is exactly when they used to
+        // merge into one shape.
+        // Three BASE at most: a 4th would auto-fuse away (FUSION.requiredBase)
+        // and the line-up being looked at would shrink while looking at it.
+        for (let i = 0; i < 5; i++) this.spawnFollowerNear(-30 - i * 10, "BRUTE");
+        for (let i = 0; i < 3; i++) this.spawnFollowerNear(-80 - i * 8);
+        // One soldier, only so the level doesn't read as instantly CLEARED
+        // and freeze the scene on the win screen. Parked beyond the nearest
+        // follower's engageRadius (BRUTE's 200) so nothing breaks off to
+        // fight while the line-up is being looked at.
+        this.spawnSoldierNear(260);
         break;
       }
       case "death": {

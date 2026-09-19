@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { FOLLOWER, FOLLOWER_STATS, FollowerKind } from "../config/tuning";
+import { FOLLOWER, FOLLOWER_STATS, FollowerKind, GROUND_LINE, HORDE_SPREAD } from "../config/tuning";
 import { CHARACTER_TEXTURE, applyCharacterArt } from "./characterArt";
 import { Soldier } from "./Soldier";
 
@@ -22,13 +22,48 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
    * past it again. */
   hasJoined = false;
 
-  constructor(scene: Phaser.Scene, x: number, y: number, rank: number, kind: FollowerKind = "BASE") {
+  /** This follower's spot in the depth band — how many world px nearer (+) or
+   * further (-) down the street it stands than the canonical ground line.
+   * Fixed at construction and never re-rolled, so a follower never pops
+   * vertically when one ahead of it dies or fuses. */
+  readonly depthOffset: number;
+
+  /** A constant nudge on this follower's *trail* target only, so a stopped
+   * line doesn't collapse onto one x. Deliberately not applied while rushing
+   * or engaging — see GameScene's follower loop. */
+  readonly xJitter: number;
+
+  /** `y` is the *canonical* ground Y (WORLD.groundY) — the constructor adds
+   * this kind's spawnYOffset and this follower's own depth offset on top, so
+   * no caller has to know about either. `seed` comes from the scene's own
+   * per-run spawn counter (see GameScene.nextFollowerSeed). */
+  constructor(
+    scene: Phaser.Scene,
+    x: number,
+    y: number,
+    rank: number,
+    kind: FollowerKind = "BASE",
+    seed = 0,
+  ) {
     const stats = FOLLOWER_STATS[kind];
-    super(scene, x, y + stats.spawnYOffset, CHARACTER_TEXTURE[kind]);
+    const { offsets, xOffsets } = HORDE_SPREAD;
+    const wrap = (n: number, len: number) => ((n % len) + len) % len;
+    const depthOffset = offsets[wrap(seed, offsets.length)];
+    super(scene, x, y + stats.spawnYOffset + depthOffset, CHARACTER_TEXTURE[kind]);
     scene.add.existing(this);
     scene.physics.add.existing(this);
     (this.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
-    applyCharacterArt(this, kind);
+    // The art has to be seated against this follower's own ground line, or
+    // originY would cancel the offset out and it would render in exactly the
+    // same place it did before.
+    applyCharacterArt(this, kind, GROUND_LINE + depthOffset);
+    this.depthOffset = depthOffset;
+    this.xJitter = xOffsets[wrap(seed, xOffsets.length)];
+    // Feet line is the sort key, so a follower standing further down the
+    // street draws behind one standing nearer — and behind Emily and the
+    // soldiers, whose feet are on the canonical line (depth 0). The seed
+    // breaks ties between two followers sharing an offset, deterministically.
+    this.setDepth(depthOffset + seed * 1e-4);
     this.rank = rank;
     this.kind = kind;
     this.stats = stats;

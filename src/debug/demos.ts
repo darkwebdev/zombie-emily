@@ -84,6 +84,12 @@ export const DEMOS = [
       "Spawns 4 Brutes — exactly what the old 8-slot cap used to allow — then paralyzes one more soldier for them to execute. The horde is uncapped now, so that conversion adds a 5th follower instead of consuming the body for nothing.",
   },
   {
+    name: "hordeSpread",
+    label: "Horde: Spread",
+    description:
+      "Eight followers (a Brute plus seven base) bunched into the space a stopped horde collapses into. Before the depth band they drew as one silhouette and the horde couldn't be counted — here every figure stands on its own line a few px nearer or further down the street, and they draw front-to-back by that line.",
+  },
+  {
     name: "death",
     label: "Death",
     description: "Drops Emily to 1 HP next to an active soldier, so its next hit triggers the death fade and restart.",
@@ -178,7 +184,7 @@ export const DEMO_GROUPS = [
   },
   {
     label: "Horde & aggro",
-    demos: ["aggroReady", "uncappedHorde"],
+    demos: ["aggroReady", "uncappedHorde", "hordeSpread"],
   },
   {
     label: "Fusion & Brutes",

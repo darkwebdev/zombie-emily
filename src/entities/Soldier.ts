@@ -54,6 +54,10 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
     (this.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
     (this.body as Phaser.Physics.Arcade.Body).setImmovable(true);
     applyCharacterArt(this, kind);
+    // Feet on the canonical ground line, so followers standing further down
+    // the street (negative depth) draw behind and nearer ones in front — see
+    // HORDE_SPREAD.
+    this.setDepth(0);
 
     this.kind = kind;
     this.stats = stats;

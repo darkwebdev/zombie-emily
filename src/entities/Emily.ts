@@ -68,6 +68,9 @@ export class Emily extends Phaser.Physics.Arcade.Sprite {
       false,
     );
     body.setOffset(EMILY_SPRITE.bodyOffsetX, EMILY_SPRITE.bodyOffsetY);
+    // Same canonical feet line as the soldiers, so the horde's depth band
+    // sorts around her too (see HORDE_SPREAD).
+    this.setDepth(0);
     this.play(EMILY_ANIM.idle);
   }
 

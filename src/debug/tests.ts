@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { CHARACTER_ART, COMBAT, EMILY, EMILY_SPRITE, FOLLOWER, GROUND_LINE, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
+import { CHARACTER_ART, COMBAT, EMILY, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
 import { EMILY_ANIM } from "../entities/Emily";
 import { SPAWNS } from "../levels/level1";
 import { touchInput } from "../systems/touchControls";
@@ -149,15 +149,18 @@ export const TESTS: TestCase[] = [
       for (const entity of roster) {
         const body = entity.body as Phaser.Physics.Arcade.Body;
         const box = CHARACTER_ART.hitbox[entity.kind];
+        // Followers stand on their own line within the depth band; soldiers
+        // are always on the canonical one (offset 0).
+        const groundLine = GROUND_LINE + ("depthOffset" in entity ? entity.depthOffset : 0);
         // The figures are all different sizes and none of them is the size of
         // its hitbox, so both of these would break silently the moment the
         // art is re-exported at a different height or a kind is added without
         // a hitbox entry: the sprite would either float/sink or quietly start
         // fighting with a box the size of its silhouette.
         checks.push({
-          label: `${entity.kind}: feet on the ground line`,
-          pass: Math.abs(entity.y + (1 - entity.originY) * entity.displayHeight - GROUND_LINE) < 0.5,
-          detail: `bottom=${(entity.y + (1 - entity.originY) * entity.displayHeight).toFixed(1)} groundLine=${GROUND_LINE}`,
+          label: `${entity.kind}: feet on its own ground line`,
+          pass: Math.abs(entity.y + (1 - entity.originY) * entity.displayHeight - groundLine) < 0.5,
+          detail: `bottom=${(entity.y + (1 - entity.originY) * entity.displayHeight).toFixed(1)} groundLine=${groundLine}`,
         });
         checks.push({
           label: `${entity.kind}: hitbox is still ${box.width}x${box.height}, bottom-centred on it`,
@@ -167,8 +170,8 @@ export const TESTS: TestCase[] = [
             Math.abs(body.width - box.width) < 0.01 &&
             Math.abs(body.height - box.height) < 0.01 &&
             Math.abs(body.x + body.width / 2 - entity.x) < 0.5 &&
-            Math.abs(body.y + body.height - GROUND_LINE) < 0.5,
-          detail: `w=${body.width.toFixed(1)} h=${body.height.toFixed(1)} cx=${(body.x + body.width / 2).toFixed(1)} x=${entity.x.toFixed(1)} bottom=${(body.y + body.height).toFixed(1)}`,
+            Math.abs(body.y + body.height - groundLine) < 0.5,
+          detail: `w=${body.width.toFixed(1)} h=${body.height.toFixed(1)} cx=${(body.x + body.width / 2).toFixed(1)} x=${entity.x.toFixed(1)} bottom=${(body.y + body.height).toFixed(1)} groundLine=${groundLine}`,
         });
       }
       return checks;
@@ -589,6 +592,14 @@ export const TESTS: TestCase[] = [
               pass: !!limb && Math.abs(limb.marker.x - limb.x) < 0.001,
               detail: `marker.x=${limb ? Math.round(limb.marker.x) : "-"} limb.x=${limb ? Math.round(limb.x) : "-"}`,
             },
+            {
+              // Characters live in HORDE_SPREAD's depth band, so a projectile
+              // at the default depth 0 would disappear behind any follower
+              // standing a pixel nearer the camera.
+              label: "Limb draws above the horde's depth band",
+              pass: !!limb && limb.depth > HORDE_SPREAD.yBand,
+              detail: `limb.depth=${limb ? limb.depth : "-"} band=±${HORDE_SPREAD.yBand}`,
+            },
           ];
         },
       },
@@ -767,6 +778,71 @@ export const TESTS: TestCase[] = [
           detail: `kinds=[${s.followers.map((f) => f.kind)}]`,
         },
         { label: "Soldier consumed", pass: s.soldiers.length === 0, detail: `soldiers=${s.soldiers.length}` },
+      ];
+    }),
+  },
+  {
+    demo: "hordeSpread",
+    name: "Horde spread: every follower on its own line, drawn front to back",
+    checkpoints: single(20, (scene) => {
+      const { followers } = scene.getTestSnapshot();
+      const depths = followers.map((f) => f.depth);
+      // The sort key is the *feet* line, not sprite y: a Brute's y also
+      // carries its spawnYOffset (-4, because it's a taller sprite), so two
+      // figures standing on the same line have different y.
+      const feetLine = (f: (typeof followers)[number]) =>
+        f.y + (1 - f.originY) * f.displayHeight;
+      // Sorting by that line has to reproduce the draw order exactly,
+      // otherwise a follower standing further down the street can still paint
+      // over one in front of it — which was half the original bug.
+      const byFeet = [...followers].sort((a, b) => feetLine(a) - feetLine(b) || a.depth - b.depth);
+      const drawOrderMatchesFeet = byFeet.every(
+        (f, i) => i === 0 || byFeet[i - 1].depth <= f.depth,
+      );
+      return [
+        {
+          label: "Eight followers bunched together",
+          pass: followers.length === 8,
+          detail: `n=${followers.length}`,
+        },
+        {
+          label: "No two followers share a depth, so none can hide behind another",
+          pass: new Set(depths).size === followers.length,
+          detail: `depths=${depths.map((d) => d.toFixed(4)).join(",")}`,
+        },
+        {
+          label: `Every depth offset inside the ±${HORDE_SPREAD.yBand}px band`,
+          pass: followers.every((f) => Math.abs(f.depthOffset) <= HORDE_SPREAD.yBand),
+          detail: followers.map((f) => f.depthOffset).join(","),
+        },
+        {
+          // The offsets are a fixed table, so this also proves the seed is
+          // actually varying per follower rather than every spawn landing on
+          // the same entry.
+          label: "The band is actually used — more than one distinct offset",
+          pass: new Set(followers.map((f) => f.depthOffset)).size >= 3,
+          detail: [...new Set(followers.map((f) => f.depthOffset))].join(","),
+        },
+        {
+          label: "Draw order is monotonic in the feet line",
+          pass: drawOrderMatchesFeet,
+          detail: byFeet.map((f) => `${feetLine(f).toFixed(0)}@${f.depth.toFixed(2)}`).join(" "),
+        },
+        {
+          // Each follower's art is seated against its own line, so the figure
+          // really moves. Solving originY against the global GROUND_LINE
+          // would cancel the offset out and render every one in the same spot.
+          label: "Each follower's feet are on its own ground line",
+          pass: followers.every(
+            (f) =>
+              Math.abs(
+                f.y + (1 - f.originY) * f.displayHeight - (GROUND_LINE + f.depthOffset),
+              ) < 0.5,
+          ),
+          detail: followers
+            .map((f) => (f.y + (1 - f.originY) * f.displayHeight).toFixed(1))
+            .join(","),
+        },
       ];
     }),
   },

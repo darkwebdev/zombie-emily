@@ -41,9 +41,15 @@ export function preloadCharacterArt(scene: Phaser.Scene): void {
  * 1. **Feet on the ground line.** The extractor emits every figure with its
  *    feet flush against the bottom edge of the image, so the sprite's bottom
  *    edge *is* its feet. originY is solved from the texture's own height so
- *    the bottom edge lands on GROUND_LINE — which also means a kind with a
+ *    the bottom edge lands on `groundLine` — which also means a kind with a
  *    spawnYOffset (BRUTE) needs no art-side compensation, because the offset
  *    is already in the y passed in here.
+ *
+ *    `groundLine` is a parameter rather than always the global GROUND_LINE
+ *    because followers stand on their own line a few px nearer or further
+ *    down the street (see HORDE_SPREAD). Solving originY against the global
+ *    line would make that offset cancel out exactly: the sprite's y would
+ *    move and the drawn figure wouldn't.
  * 2. **The hitbox is unchanged by the art.** The body is set explicitly to the
  *    kind's world box from CHARACTER_ART.hitbox and seated bottom-centred, so
  *    it stays exactly the rectangle the gameplay was tuned against rather than
@@ -54,6 +60,7 @@ export function preloadCharacterArt(scene: Phaser.Scene): void {
 export function applyCharacterArt(
   sprite: Phaser.Physics.Arcade.Sprite,
   kind: EnemyKind | FollowerKind,
+  groundLine: number = GROUND_LINE,
 ): void {
   const { artScale, renderScale, hitbox } = CHARACTER_ART;
   const box = hitbox[kind];
@@ -63,7 +70,7 @@ export function applyCharacterArt(
   const displayHeight = texHeight * renderScale;
 
   sprite.setScale(renderScale);
-  sprite.setOrigin(0.5, 1 - (GROUND_LINE - sprite.y) / displayHeight);
+  sprite.setOrigin(0.5, 1 - (groundLine - sprite.y) / displayHeight);
 
   const body = sprite.body as Phaser.Physics.Arcade.Body;
   const bodyW = box.width * artScale;
