@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ENEMY_STATS, EnemyKind, SHIELD_FLASH_DURATION, SOLDIER } from "../config/tuning";
+import { CHARACTER_FRONT_DEPTH, ENEMY_STATS, EnemyKind, SHIELD_FLASH_DURATION, SOLDIER } from "../config/tuning";
 import { CHARACTER_TEXTURE, applyCharacterArt } from "./characterArt";
 
 // The art is already coloured per kind, so the base "tint" is white: no tint
@@ -54,10 +54,10 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
     (this.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
     (this.body as Phaser.Physics.Arcade.Body).setImmovable(true);
     applyCharacterArt(this, kind);
-    // Feet on the canonical ground line, so followers standing further down
-    // the street (negative depth) draw behind and nearer ones in front — see
-    // HORDE_SPREAD.
-    this.setDepth(0);
+    // Feet on the canonical ground line, but drawn in front of the horde
+    // rather than sorted into it — a soldier buried under a swarm hides the
+    // paralyze/aim tints the player reads it by. See CHARACTER_FRONT_DEPTH.
+    this.setDepth(CHARACTER_FRONT_DEPTH);
 
     this.kind = kind;
     this.stats = stats;

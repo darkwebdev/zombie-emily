@@ -60,9 +60,10 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
     this.depthOffset = depthOffset;
     this.xJitter = xOffsets[wrap(seed, xOffsets.length)];
     // Feet line is the sort key, so a follower standing further down the
-    // street draws behind one standing nearer — and behind Emily and the
-    // soldiers, whose feet are on the canonical line (depth 0). The seed
-    // breaks ties between two followers sharing an offset, deterministically.
+    // street draws in front of one standing further back. Emily and the
+    // soldiers are exempt and always draw in front (CHARACTER_FRONT_DEPTH).
+    // The seed breaks ties between two followers sharing an offset,
+    // deterministically.
     this.setDepth(depthOffset + seed * 1e-4);
     this.rank = rank;
     this.kind = kind;

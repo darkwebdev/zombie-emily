@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { EMILY, EMILY_SPRITE } from "../config/tuning";
+import { CHARACTER_FRONT_DEPTH, EMILY, EMILY_SPRITE } from "../config/tuning";
 import idleUrl from "../assets/emily-idle.png";
 import walkUrl from "../assets/emily-walk.png";
 import throwUrl from "../assets/emily-throw.png";
@@ -68,9 +68,9 @@ export class Emily extends Phaser.Physics.Arcade.Sprite {
       false,
     );
     body.setOffset(EMILY_SPRITE.bodyOffsetX, EMILY_SPRITE.bodyOffsetY);
-    // Same canonical feet line as the soldiers, so the horde's depth band
-    // sorts around her too (see HORDE_SPREAD).
-    this.setDepth(0);
+    // Drawn in front of the horde rather than sorted into it — see
+    // CHARACTER_FRONT_DEPTH for why the player character can't be buried.
+    this.setDepth(CHARACTER_FRONT_DEPTH);
     this.play(EMILY_ANIM.idle);
   }
 

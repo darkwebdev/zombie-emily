@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { CHARACTER_ART, COMBAT, EMILY, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
+import { BACKGROUND, CHARACTER_ART, COMBAT, EMILY, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
 import { EMILY_ANIM } from "../entities/Emily";
 import { SPAWNS } from "../levels/level1";
 import { touchInput } from "../systems/touchControls";
@@ -811,9 +811,31 @@ export const TESTS: TestCase[] = [
           detail: `depths=${depths.map((d) => d.toFixed(4)).join(",")}`,
         },
         {
-          label: `Every depth offset inside the ±${HORDE_SPREAD.yBand}px band`,
-          pass: followers.every((f) => Math.abs(f.depthOffset) <= HORDE_SPREAD.yBand),
+          // The bug this guards: the band used to be symmetric, and the
+          // street texture starts *at* GROUND_LINE and runs downward — so a
+          // negative offset stood a follower on the fence above the road,
+          // visibly hanging in the air. Every offset must be forward of the
+          // line, never behind it.
+          label: `Every depth offset forward of the ground line, within ${HORDE_SPREAD.yBand}px`,
+          pass: followers.every((f) => f.depthOffset >= 0 && f.depthOffset <= HORDE_SPREAD.yBand),
           detail: followers.map((f) => f.depthOffset).join(","),
+        },
+        {
+          // ...and the band has to fit on the road as actually drawn, rather
+          // than on a number that could drift from the art. The street layer
+          // is as tall as its own texture divided by its artScale.
+          label: "Every follower's feet are on the drawn street, not above it",
+          pass: (() => {
+            const layer = BACKGROUND.layers.find((l) => l.key === "bg-ground")!;
+            const streetTop = layer.y;
+            const streetBottom =
+              layer.y + scene.textures.get(layer.key).getSourceImage().height / layer.artScale;
+            return followers.every((f) => {
+              const feet = feetLine(f);
+              return feet >= streetTop - 0.5 && feet <= streetBottom;
+            });
+          })(),
+          detail: followers.map((f) => feetLine(f).toFixed(1)).join(","),
         },
         {
           // The offsets are a fixed table, so this also proves the seed is

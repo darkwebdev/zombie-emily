@@ -342,8 +342,9 @@ export const COMBAT = {
 // How the horde is spread out so it can actually be counted. Followers used
 // to share one ground line and had no depth sorting at all, so a cluster of
 // them merged into a single silhouette and the player couldn't read their own
-// horde size. Each follower now stands a few pixels nearer or further down
-// the street, and characters draw front-to-back by that line.
+// horde size. Each follower now stands a few pixels further down the street
+// than the line Emily and the soldiers walk on, and characters draw
+// front-to-back by that line.
 //
 // The offsets are a fixed scrambled table indexed by a per-follower seed, not
 // Math.random(): the debug suite asserts against the live scene, so a value
@@ -351,19 +352,30 @@ export const COMBAT = {
 // deliberately NOT derived from `rank` — rank shifts down when a follower
 // ahead dies or fuses, which would make everyone behind it pop vertically.
 //
+// The band only ever runs DOWNWARD, toward the camera — never up. The street
+// (BACKGROUND's "bg-ground" layer) is drawn starting *at* GROUND_LINE and
+// extends down to the bottom of the viewport, so GROUND_LINE isn't the middle
+// of the road, it's its back edge. The first version of this band was
+// symmetric (±4) and a follower that drew a negative offset stood four pixels
+// above the tarmac, on the fence — reading exactly as "hanging in the air,
+// ignoring the floor". Keeping every offset >= 0 means a follower can only
+// ever stand further forward on a road that is really there.
+//
 // The band is tiny on purpose. It has to stay small enough that the depths it
 // produces sit below LIMB.marker.depth (50) and above the background layers
-// (-70 and back), and small enough not to matter to contact geometry:
+// (-70 and back), that the whole band fits inside the street's own height
+// (16 world px), and small enough not to matter to contact geometry:
 // CombatSystem measures centre-to-centre, so an offset of dy shrinks a
-// follower's horizontal reach to sqrt(reach^2 - dy^2) — worst case 0.51px for
-// a base follower and 1.67px for a Brute (which already fights 4px off a
-// soldier's line today because of its spawnYOffset).
+// follower's horizontal reach to sqrt(reach^2 - dy^2) — worst case 1.16px for
+// a base follower at the front of the band, and less for a Brute, whose
+// spawnYOffset (-4) happens to pull it back toward a soldier's own line.
 export const HORDE_SPREAD = {
-  /** Vertical half-range, world px. */
-  yBand: 4,
+  /** How far down the street a follower can stand, world px. Always forward
+   * of GROUND_LINE, never behind it — see the note above. */
+  yBand: 6,
   /** Indexed by the follower's seed. Scrambled rather than sequential so
    * consecutive spawns don't line up into a visible staircase. */
-  offsets: [0, 3, -2, 4, -4, 2, -3, 1, -1, 3],
+  offsets: [0, 4, 2, 6, 1, 5, 3, 6, 2, 5],
   /** Horizontal offsets, world px, applied to the trail-follow target only —
    * a rushing or engaging follower converges on the soldier's real x instead,
    * so ganging up on a target isn't degraded by jitter.
@@ -382,10 +394,19 @@ export const HORDE_SPREAD = {
   xOffsets: [0, 13, -7, 20, -17, 6, -13],
 };
 
+/** Draw depth for Emily and the soldiers. They stand on the canonical
+ * GROUND_LINE, which is now the *back* edge of the horde's band, so sorting
+ * them strictly by their feet would bury them behind every follower. Both are
+ * figures whose state the player has to be able to read at a glance — Emily
+ * because she's the one being aimed, a soldier because its paralyze and aim
+ * tints are the whole tell — so they draw in front of the horde instead. The
+ * lie is at most HORDE_SPREAD.yBand px deep and nobody can see it. */
+export const CHARACTER_FRONT_DEPTH = HORDE_SPREAD.yBand + 1;
+
 /** Draw depth for thrown limbs and bullets. Characters sit in the depth band
- * HORDE_SPREAD puts them in ([-4, +4]), so a projectile left at the default 0
- * would be swallowed by any follower standing a pixel nearer the camera.
- * Above the whole band, below LIMB.marker.depth (50). */
+ * HORDE_SPREAD puts them in, so a projectile left at the default 0 would be
+ * swallowed by any follower standing a pixel nearer the camera. Above every
+ * character, below LIMB.marker.depth (50). */
 export const PROJECTILE_DEPTH = 10;
 
 export const TRAIL = {
