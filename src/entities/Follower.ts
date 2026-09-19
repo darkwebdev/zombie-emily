@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { FOLLOWER, FOLLOWER_STATS, FollowerKind, GROUND_LINE, HORDE_SPREAD } from "../config/tuning";
+import { FLANK, FOLLOWER, FOLLOWER_STATS, FollowerKind, GROUND_LINE, HORDE_SPREAD } from "../config/tuning";
 import { CHARACTER_TEXTURE, applyCharacterArt } from "./characterArt";
 import { Soldier } from "./Soldier";
 
@@ -21,6 +21,19 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
    * snapping straight back into line; it only rejoins once Emily walks
    * past it again. */
   hasJoined = false;
+
+  /** Which soldier this follower's flank side was chosen against, and the
+   * side itself: -1 left of it, +1 right, 0 "not flanking, walk at its
+   * centre". Latched — once a side is taken it is held for as long as the
+   * target is the same object, which is what stops two followers at
+   * near-equal distance swapping sides every frame. Cleared when the target
+   * changes or is lost. See FLANK in tuning. */
+  flankTarget: Soldier | null = null;
+  flankSide: -1 | 0 | 1 = 0;
+
+  /** This follower's nudge on its flank standoff, so two on the same side
+   * don't stand in the same spot. Resolved once from the spawn seed. */
+  readonly flankJitter: number;
 
   /** This follower's spot in the depth band — how many world px nearer (+) or
    * further (-) down the street it stands than the canonical ground line.
@@ -59,6 +72,7 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
     applyCharacterArt(this, kind, GROUND_LINE + depthOffset);
     this.depthOffset = depthOffset;
     this.xJitter = xOffsets[wrap(seed, xOffsets.length)];
+    this.flankJitter = FLANK.sideJitter[wrap(seed, FLANK.sideJitter.length)];
     // Feet line is the sort key, so a follower standing further down the
     // street draws in front of one standing further back. Emily and the
     // soldiers are exempt and always draw in front (CHARACTER_FRONT_DEPTH).
@@ -101,11 +115,32 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
+  /** Drop the latched flank side if this follower is no longer attacking the
+   * soldier it chose that side against — a new fight is a new decision.
+   * Called once a frame by GameScene before anyone moves. */
+  releaseFlankIfNot(target: Soldier | null): void {
+    if (this.flankTarget === target) return;
+    this.flankTarget = target;
+    this.flankSide = 0;
+  }
+
+  /** Point at something regardless of which way this follower is travelling.   * followTarget flips by direction of travel, which is wrong the moment a
+   * follower crosses to a soldier's far side: it arrives past its target and
+   * would stand there facing away from the thing it's biting. Two clusters
+   * facing inward is most of what makes a surround read as one. */
+  faceToward(targetX: number): void {
+    this.setFlipX(targetX < this.x);
+  }
+
   /** Beelines at boosted speed during an aggro burst; no steering/re-acquire. */
   rushToward(targetX: number): void {
     const dx = targetX - this.x;
     this.setFlipX(dx < 0);
-    if (Math.abs(dx) < 10) {
+    // stats.deadzone, not a hardcoded stop: a rusher aiming at a flank slot
+    // already stands flankStandoff off the soldier's centre, and a stop
+    // distance bigger than the deadzone would park it outside its own bite
+    // range for the whole burst.
+    if (Math.abs(dx) < this.stats.deadzone) {
       this.setVelocityX(0);
     } else {
       this.setVelocityX(Math.sign(dx) * this.stats.speed * this.stats.rushSpeedMult);

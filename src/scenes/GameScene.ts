@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { WORLD, EMILY, EMILY_SPRITE, LIMB, COMBAT, AGGRO, FUSION, TRAIL_DEGENERATION_THRESHOLD } from "../config/tuning";
+import { WORLD, EMILY, EMILY_SPRITE, LIMB, COMBAT, AGGRO, FLANK, FUSION, TRAIL_DEGENERATION_THRESHOLD } from "../config/tuning";
 import type { DemoName } from "../debug/demos";
 import type { EnemyKind, FollowerKind } from "../config/tuning";
 import { Emily } from "../entities/Emily";
@@ -207,6 +207,17 @@ export class GameScene extends Phaser.Scene {
     }
     this.aggro.resolveRushExits(this.followers);
 
+    // Each follower's fight, resolved before anyone moves: the flank slots
+    // below need to know how many followers are converging on a given
+    // soldier, and how they're already split across its two sides, which
+    // isn't knowable while the same pass is still moving them.
+    const engaging = new Map<Follower, Soldier>();
+    this.followers.forEach((f) => {
+      const target = f.mode === "RUSH" && f.rushTarget ? f.rushTarget : this.findNearestEngageable(f);
+      if (target) engaging.set(f, target);
+      f.releaseFlankIfNot(target ?? null);
+    });
+
     // Walked in rank order (front to back) so each unit's trail offset can
     // accumulate the trailSpacing of everyone ahead of it — a mixed roster
     // (a tight-spacing Brute up front, wider-spacing base followers behind)
@@ -216,14 +227,16 @@ export class GameScene extends Phaser.Scene {
       .sort((a, b) => a.rank - b.rank)
       .forEach((f) => {
         trailOffset += f.stats.trailSpacing;
-        if (f.mode === "RUSH" && f.rushTarget) {
-          f.rushToward(f.rushTarget.x);
-          f.hasJoined = false; // once the rush ends, wait here rather than snapping back to the trail
-          return;
-        }
-        const nearbyTarget = this.findNearestEngageable(f);
-        if (nearbyTarget) {
-          f.followTarget(nearbyTarget.x);
+        const target = engaging.get(f);
+        if (target) {
+          const slotX = this.flankSlotX(f, target, engaging);
+          if (f.mode === "RUSH") f.rushToward(slotX);
+          else f.followTarget(slotX);
+          // Whichever side it ended up on, it bites the soldier, so it has
+          // to look at it — followTarget/rushToward face by direction of
+          // travel, which points a follower that crossed to the far side
+          // away from the thing it's attacking.
+          f.faceToward(target.x);
           f.hasJoined = false; // once this fight ends, wait here rather than snapping back to the trail
           return;
         }
@@ -430,6 +443,47 @@ export class GameScene extends Phaser.Scene {
     return nearest;
   }
 
+  /** Where a follower should stand to attack `target`, latching it to a side
+   * the first time it's one of several attacking the same soldier.
+   *
+   * The latch is the anti-oscillation guarantee: a side, once taken, is held
+   * for as long as the target is the same soldier, so two followers at
+   * near-equal distance can't swap places every frame. Sides are picked by
+   * whichever currently holds fewer followers, counted live off the
+   * followers themselves so a death mid-fight rebalances the next arrival
+   * rather than shuffling everyone already in place — and never off `rank`,
+   * which shifts when a follower ahead dies.
+   *
+   * Below FLANK.minEngagers nobody flanks; a lone follower walks at the
+   * soldier's centre exactly as before. Crossing the threshold is one-way:
+   * a follower that took a side keeps it when its partner dies, because
+   * stepping back to centre mid-fight is the same visual pop the latch
+   * exists to prevent. */
+  private flankSlotX(follower: Follower, target: Soldier, engaging: Map<Follower, Soldier>): number {
+    if (follower.flankSide === 0) {
+      let attackers = 0;
+      let left = 0;
+      let right = 0;
+      engaging.forEach((t, other) => {
+        if (t !== target) return;
+        attackers++;
+        if (other === follower) return;
+        if (other.flankSide === -1) left++;
+        else if (other.flankSide === 1) right++;
+      });
+      if (attackers >= FLANK.minEngagers) {
+        // Tie goes to the side the follower is already on, so nobody crosses
+        // the soldier without a reason to.
+        follower.flankSide =
+          left < right ? -1 : right < left ? 1 : ((Math.sign(follower.x - target.x) || 1) as -1 | 1);
+      }
+    }
+
+    if (follower.flankSide === 0) return target.x;
+    const standoff = follower.stats.flankStandoff + follower.flankJitter;
+    return Phaser.Math.Clamp(target.x + follower.flankSide * standoff, 0, WORLD.levelWidth);
+  }
+
   private nearestZombieX(soldier: Soldier, radius: number): { x: number; dist: number } | null {
     let bestDist = radius;
     let bestX: number | null = null;
@@ -490,7 +544,9 @@ export class GameScene extends Phaser.Scene {
           // RECOVERING window (1.2s x 70 speed = 84px) could ever close,
           // so the attack has to outlive the call that triggered it.
           if (soldier.respondingToCall && target) {
-            soldier.faceToward(target.x);
+            // force: a walking soldier always faces where it walks, or the
+            // turn commitment would make it moonwalk. See Soldier.faceToward.
+            soldier.faceToward(target.x, true);
             soldier.moveToward(target.x);
             continue;
           }
@@ -511,7 +567,7 @@ export class GameScene extends Phaser.Scene {
               // it), falling back to the caller's own position only if
               // nothing's close enough to it to identify yet.
               const threat = this.nearestZombieX(caller, caller.stats.detectRadius);
-              soldier.faceToward(threat?.x ?? caller.x);
+              soldier.faceToward(threat?.x ?? caller.x, true);
               soldier.moveToward(threat?.x ?? caller.x);
               continue;
             }
@@ -902,6 +958,26 @@ export class GameScene extends Phaser.Scene {
         // Emily needed to reach the conversion.
         for (let i = 0; i < 4; i++) this.spawnFollowerNear(-40 - i * 24, "BRUTE");
         this.spawnSoldierNear(40).paralyze();
+        break;
+      }
+      case "hordeFlank": {
+        // Two fights at once, because the interesting claim is the contrast.
+        //
+        // Left: exactly FLANK.minEngagers followers on one soldier, so they
+        // split one to each side and the far one walks through it to get
+        // there. Two rather than four on purpose — four base followers deal
+        // 8 damage in their first volley and a 6hp STANDARD would be dead
+        // before it could be seen surrounded at all.
+        [-10, -25].forEach((dx) => {
+          this.spawnFollowerNear(dx).hasJoined = true;
+        });
+        this.spawnSoldierNear(50);
+        // Right: one follower on its own soldier, below the threshold, so it
+        // still walks straight at the centre exactly as before. Parked far
+        // enough that neither fight is inside the other's engageRadius (140)
+        // — 150px apart, so nothing crosses over.
+        this.spawnFollowerNear(200).hasJoined = true;
+        this.spawnSoldierNear(240);
         break;
       }
       case "hordeSpread": {

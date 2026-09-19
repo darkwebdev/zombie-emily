@@ -108,6 +108,12 @@ export const FOLLOWER = {
   rushSpeedMult: 1.8,
   engageRadius: 140,
   reach: 16, // matches COMBAT.contactRange — a no-op for base followers
+  // How far off a soldier's x a flanking follower parks. Must satisfy
+  // flankStandoff + deadzone + max|FLANK.sideJitter| <= sqrt(reach^2 - dy^2),
+  // where dy is the worst-case HORDE_SPREAD offset — otherwise a follower
+  // that takes a slot stands outside its own bite range and the surround
+  // silently costs damage. Base: 8 + 4 + 2 = 14 <= sqrt(16^2 - 6^2) = 14.8.
+  flankStandoff: 8,
   hitHalfWidth: 8,
   trailSpacing: 6, // matches TRAIL.spacingSamples
   spawnYOffset: 0,
@@ -129,6 +135,10 @@ export const BRUTE = {
   rushSpeedMult: 1.5,
   engageRadius: 200,
   reach: 20,
+  // 10 + 4 + 2 = 16 <= sqrt(20^2 - 2^2) = 19.9. A Brute's spawnYOffset (-4)
+  // pulls it back toward a soldier's own line, so its dy is smaller than a
+  // base follower's despite the longer reach. See FOLLOWER.flankStandoff.
+  flankStandoff: 10,
   hitHalfWidth: 12,
   trailSpacing: 4, // hugs Emily tighter to offset the lower speed
   spawnYOffset: -4, // taller sprite (36 vs 28) — keeps its feet on the ground line
@@ -166,6 +176,19 @@ export const SOLDIER = {
   bulletSpeed: 0,
   bulletDamage: 0,
   bulletRange: 0,
+  // How long this kind commits to a facing after turning, seconds. A soldier
+  // faces the nearest zombie, so before this existed two followers on
+  // opposite sides at near-equal distance made it flip every single frame —
+  // visual noise that reads as a broken figure, and for a Shield Trooper a
+  // defence decided by sub-pixel luck. See Soldier.faceToward for the rules
+  // that stop it feeling broken: the FIRST turn is always free (this is a
+  // cooldown after turning, never a dwell before it), a request to face the
+  // way it already faces doesn't restart the clock, a walking soldier is
+  // exempt (it would moonwalk), and paralyze() clears it.
+  // Nothing directional depends on a STANDARD's facing, so this is pure
+  // legibility: long enough to read as a deliberate turn, short enough that
+  // it never looks stuck while Emily circles it.
+  turnCooldown: 0.5,
   // 0 means "never calls for help" — see RIFLEMAN.
   callForHelpRadius: 0,
 };
@@ -194,6 +217,11 @@ export const SHIELD_TROOPER = {
   bulletSpeed: 0,
   bulletDamage: 0,
   bulletRange: 0,
+  // The longest in the game: this is the one kind whose facing IS a defence,
+  // so committing to it is what makes going around the back worth doing. The
+  // horde pulling it round exposes its unshielded side for at least this long
+  // even after it loses the position.
+  turnCooldown: 1.0,
   callForHelpRadius: 0,
 };
 
@@ -225,6 +253,12 @@ export const RIFLEMAN = {
   bulletSpeed: 260,
   bulletDamage: 2,
   bulletRange: 200,
+  // The shortest, which looks backwards until you notice it already has the
+  // strongest commitment in the game: isAiming freezes its facing for the
+  // whole 0.9s windup, so this only covers the gaps between shots. Keeping it
+  // small also avoids locking a committed shot in a stale direction —
+  // tickWeapon captures lockedAimDir from `facing` when a windup starts.
+  turnCooldown: 0.3,
   // While RECOVERING (gun down, vulnerable), it calls any melee soldier
   // within this radius to break its usual stand-still and come guard it —
   // reverts the instant it leaves RECOVERING (converts, dies, or times
@@ -376,9 +410,11 @@ export const HORDE_SPREAD = {
   /** Indexed by the follower's seed. Scrambled rather than sequential so
    * consecutive spawns don't line up into a visible staircase. */
   offsets: [0, 4, 2, 6, 1, 5, 3, 6, 2, 5],
-  /** Horizontal offsets, world px, applied to the trail-follow target only —
-   * a rushing or engaging follower converges on the soldier's real x instead,
-   * so ganging up on a target isn't degraded by jitter.
+  /** Horizontal offsets, world px, applied to the trail-follow target only.
+   * A rushing or engaging follower converges on a *flank slot* instead (see
+   * FLANK), which has its own small bounded jitter sized against bite reach —
+   * this table is far too wide to use in a fight without pushing followers
+   * out of range of what they're biting.
    *
    * These have to be comparable to a figure's *width* (a base follower is
    * ~22px wide, a Brute ~31px) to do anything: the first attempt used ±4 and
@@ -408,6 +444,39 @@ export const CHARACTER_FRONT_DEPTH = HORDE_SPREAD.yBand + 1;
  * swallowed by any follower standing a pixel nearer the camera. Above every
  * character, below LIMB.marker.depth (50). */
 export const PROJECTILE_DEPTH = 10;
+
+// Surrounding. Followers used to all steer at a soldier's exact x, so they
+// piled onto whichever side they arrived from — always the same side, since
+// they trail Emily — and a gang-up read as a queue rather than a mob.
+// Engaging followers now take a side and park a standoff off the soldier's
+// centre, so a fight visibly closes in from both directions.
+//
+// Sides are shared, not exclusive seats: any number of followers can hold
+// one, so total damage on a single target is exactly unchanged. Exclusive
+// seats would have capped a gang-up at about two biters, which is a direct
+// contradiction of the uncapped-horde decision (docs/PROGRESSION.md section 1).
+//
+// A follower LATCHES its side for as long as it keeps the same target. That
+// latch is the whole anti-oscillation guarantee: picking a side fresh each
+// frame would make two followers at near-equal distance swap sides forever.
+// Sides are chosen by whichever currently has fewer followers on it, counted
+// live from the followers themselves, so the balance survives deaths mid
+// fight — and deliberately NOT from `rank`, which shifts when a follower
+// ahead dies (the lesson from the horde-spread work).
+export const FLANK = {
+  /** Below this many followers on one soldier, nobody flanks — a lone
+   * follower still walks straight at it. "Attacking in numbers" is meant
+   * literally: one zombie doesn't surround anything. The threshold is
+   * upgrade-only, so a follower that already took a side keeps it when its
+   * partner dies rather than stepping back to centre. */
+  minEngagers: 2,
+  /** Small per-follower variation on the standoff so two followers sharing a
+   * side don't stand in exactly the same spot. Bounded well inside the
+   * reach budget in FOLLOWER.flankStandoff — this is a nudge, not the
+   * horde-spread scatter. Length 5 is coprime with HORDE_SPREAD's tables
+   * (10 and 7) so the three don't cycle together. */
+  sideJitter: [0, 2, -2, 1, -1],
+};
 
 export const TRAIL = {
   sampleIntervalMs: 60,

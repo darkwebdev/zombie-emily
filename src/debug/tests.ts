@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { BACKGROUND, CHARACTER_ART, COMBAT, EMILY, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
+import { BACKGROUND, CHARACTER_ART, COMBAT, EMILY, FLANK, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
 import { EMILY_ANIM } from "../entities/Emily";
 import { SPAWNS } from "../levels/level1";
 import { touchInput } from "../systems/touchControls";
@@ -867,6 +867,145 @@ export const TESTS: TestCase[] = [
         },
       ];
     }),
+  },
+  {
+    demo: "hordeFlank",
+    name: "Followers attacking in numbers take both sides; a lone one doesn't",
+    run: (scene) => {
+      // Everything here is sampled every frame rather than read once at a
+      // checkpoint, because both claims are about something that happens
+      // *during* a fight that doesn't last long: two base followers kill a
+      // 6hp STANDARD in three bites, so the soldier is dead well under a
+      // second after they arrive. A fixed-time assertion would be a race
+      // against that kill. And the facing claim is about how OFTEN facing
+      // changes, which a single reading cannot see at all — a soldier
+      // strobing every frame still ends up on a reasonable-looking value.
+      const s = scene.getTestSnapshot();
+      const ganged = s.soldiers[0];
+      const solo = s.soldiers[1];
+      const obs = {
+        flips: 0,
+        surrounded: false,
+        surroundedInRange: false,
+        surroundedFacing: false,
+        soloClosest: Infinity,
+        soloTookSide: false,
+      };
+      let lastFacing = ganged?.facing;
+      scene.events.on(Phaser.Scenes.Events.POST_UPDATE, () => {
+        const now = scene.getTestSnapshot();
+        if (ganged?.active) {
+          if (ganged.facing !== lastFacing) {
+            obs.flips++;
+            lastFacing = ganged.facing;
+          }
+          const on = now.followers.filter((f) => f.flankTarget === ganged);
+          const left = on.filter((f) => f.x < ganged.x);
+          const right = on.filter((f) => f.x > ganged.x);
+          if (left.length >= 1 && right.length >= 1) {
+            obs.surrounded = true;
+            const inRange = on.every(
+              (f) =>
+                Phaser.Math.Distance.Between(f.x, f.y, ganged.x, ganged.y) <=
+                Math.max(COMBAT.contactRange, f.stats.reach),
+            );
+            const facing = on.every((f) => f.flipX === f.x > ganged.x);
+            if (inRange) obs.surroundedInRange = true;
+            if (facing) obs.surroundedFacing = true;
+          }
+        }
+        const loner = now.followers.find((f) => f.flankTarget === solo);
+        if (loner && solo?.active) {
+          obs.soloClosest = Math.min(obs.soloClosest, Math.abs(loner.x - solo.x));
+          if (loner.flankSide !== 0) obs.soloTookSide = true;
+        }
+      });
+      (scene as unknown as { __flank?: typeof obs }).__flank = obs;
+    },
+    checkpoints: [
+      {
+        // Frame 3: sides are latched the first frame both followers target
+        // the same soldier, long before anyone has walked anywhere. Asserting
+        // the assignment here rather than from final positions is what proves
+        // the mechanism, instead of proving that two bodies drifted apart.
+        afterMs: 3 * 16,
+        assert: (scene) => {
+          const { followers, soldiers } = scene.getTestSnapshot();
+          const ganged = followers.filter((f) => f.flankTarget === soldiers[0]);
+          const solo = followers.filter((f) => f.flankTarget === soldiers[1]);
+          const sides = ganged.map((f) => f.flankSide).sort();
+          return [
+            {
+              label: `Both fights picked up: ${FLANK.minEngagers} on one soldier, 1 on the other`,
+              pass: ganged.length === FLANK.minEngagers && solo.length === 1,
+              detail: `ganged=${ganged.length} solo=${solo.length}`,
+            },
+            {
+              // Both spawn on Emily's side, so "whichever side has fewer"
+              // is the only thing that can split them — a nearest-side rule
+              // would put both on the near one and never surround anything.
+              label: "The pair split one to each side rather than both taking the near one",
+              pass: sides.length === 2 && sides[0] === -1 && sides[1] === 1,
+              detail: `sides=${sides.join(",")}`,
+            },
+            {
+              // The threshold is meant literally — one zombie surrounds
+              // nothing, and should behave exactly as it did before.
+              label: "The lone follower takes no side at all",
+              pass: solo[0]?.flankSide === 0,
+              detail: `side=${solo[0]?.flankSide}`,
+            },
+          ];
+        },
+      },
+      {
+        // Long enough for both fights to have played out completely.
+        afterMs: 1400,
+        assert: (scene) => {
+          const obs = (scene as unknown as { __flank: {
+            flips: number; surrounded: boolean; surroundedInRange: boolean;
+            surroundedFacing: boolean; soloClosest: number; soloTookSide: boolean;
+          } }).__flank;
+          const soloStats = FOLLOWER;
+          return [
+            {
+              label: "The pair got either side of their soldier while it was alive",
+              pass: obs.surrounded,
+              detail: `surrounded=${obs.surrounded}`,
+            },
+            {
+              // The whole point of the budget in FOLLOWER.flankStandoff: a
+              // follower that takes a slot but ends up outside its own reach
+              // would make surrounding a silent damage loss.
+              label: "And both were inside their own bite range while doing it",
+              pass: obs.surroundedInRange,
+              detail: `inRange=${obs.surroundedInRange}`,
+            },
+            {
+              // followTarget flips by direction of travel, so the one that
+              // crossed to the far side would otherwise stand with its back
+              // to the thing it's biting.
+              label: "Both faced the soldier, including the one that walked past it",
+              pass: obs.surroundedFacing,
+              detail: `facing=${obs.surroundedFacing}`,
+            },
+            {
+              label: "The lone follower walked to its soldier's centre, not off to one side",
+              pass: obs.soloClosest <= soloStats.deadzone + 1 && !obs.soloTookSide,
+              detail: `closest=${obs.soloClosest.toFixed(1)} tookSide=${obs.soloTookSide}`,
+            },
+            {
+              // With zombies on both sides this used to be able to flip every
+              // single frame. Bounded by the fight's length over the kind's
+              // own turn cooldown, plus the first turn, which is always free.
+              label: "It committed to a facing instead of strobing between them",
+              pass: obs.flips <= Math.ceil(1.4 / SOLDIER.turnCooldown) + 1,
+              detail: `flips=${obs.flips} cooldown=${SOLDIER.turnCooldown}s`,
+            },
+          ];
+        },
+      },
+    ],
   },
   {
     demo: "death",

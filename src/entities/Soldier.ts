@@ -26,6 +26,9 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
   hp: number;
   facing: 1 | -1;
   contactCooldownRemaining = 0;
+  /** Seconds left before this soldier will consider turning again. See
+   * stats.turnCooldown and faceToward. */
+  turnCooldownRemaining = 0;
 
   // Targeting scratch, written each frame by GameScene.updateSoldierTargeting.
   targetX: number | null = null;
@@ -85,9 +88,27 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
     return this.aimRemaining > 0;
   }
 
-  faceToward(targetX: number): void {
-    this.facing = targetX < this.x ? -1 : 1;
+  /** Turn to face a point, subject to this kind's turn commitment.
+   *
+   * Two guards that both matter. A request to face the way it *already*
+   * faces is a no-op and must NOT restart the clock, or a soldier standing
+   * still would re-arm its cooldown every frame and effectively never be
+   * able to turn. And the cooldown starts only once a turn has happened, so
+   * a freshly spawned or newly arrived soldier reacts immediately — a
+   * dwell before the first turn reads as an enemy that is asleep.
+   *
+   * `force` skips the commitment entirely, for callers where facing isn't a
+   * decision but a consequence: a walking soldier must always face where
+   * it's walking (moveToward takes its direction from its own dx, so a
+   * rate-limited charger would moonwalk — slide one way while drawn facing
+   * the other, for up to a whole second). */
+  faceToward(targetX: number, force = false): void {
+    const want: 1 | -1 = targetX < this.x ? -1 : 1;
+    if (want === this.facing) return;
+    if (!force && this.turnCooldownRemaining > 0) return;
+    this.facing = want;
     this.setFlipX(this.facing === -1);
+    this.turnCooldownRemaining = this.stats.turnCooldown;
   }
 
   /** True if a limb flying with this X velocity would hit the shielded
@@ -109,6 +130,10 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
     if (this.state === "PARALYZED" || this.state === "CONVERTING") return;
     this.state = "PARALYZED";
     this.paralyzeRemaining = this.stats.paralyzeDuration;
+    // A shield is down for the whole of PARALYZED and RECOVERING, so there's
+    // nothing left to commit to — coming back up with a stale commitment
+    // would leave it unable to re-acquire for no reason the player can see.
+    this.turnCooldownRemaining = 0;
     this.setTint(PARALYZED_TINT);
     this.setVelocityX(0);
     // A limb landing mid-windup cancels the shot — the core skill answer to
@@ -177,6 +202,7 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
    * ranged weapon timer; movement is driven externally. */
   update(dt: number): void {
     if (this.contactCooldownRemaining > 0) this.contactCooldownRemaining -= dt;
+    if (this.turnCooldownRemaining > 0) this.turnCooldownRemaining -= dt;
 
     // The shield is part of the art now, and flipX keeps it on the side this
     // soldier actually blocks from. "Guard down" during RECOVERING is carried

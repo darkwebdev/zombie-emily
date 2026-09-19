@@ -90,6 +90,12 @@ export const DEMOS = [
       "Eight followers (a Brute plus seven base) bunched into the space a stopped horde collapses into. Before the depth band they drew as one silhouette and the horde couldn't be counted — here every figure stands on its own line a few px nearer or further down the street, and they draw front-to-back by that line.",
   },
   {
+    name: "hordeFlank",
+    label: "Horde: Surround",
+    description:
+      "Two fights side by side, no input needed. On the left, two followers break off on their own and split across both sides of their soldier instead of queueing up on the side they arrived from — the far one walks straight through it to get there. On the right, one follower on its own soldier stays below the threshold and still walks straight at its centre.",
+  },
+  {
     name: "death",
     label: "Death",
     description: "Drops Emily to 1 HP next to an active soldier, so its next hit triggers the death fade and restart.",
@@ -184,7 +190,7 @@ export const DEMO_GROUPS = [
   },
   {
     label: "Horde & aggro",
-    demos: ["aggroReady", "uncappedHorde", "hordeSpread"],
+    demos: ["aggroReady", "uncappedHorde", "hordeSpread", "hordeFlank"],
   },
   {
     label: "Fusion & Brutes",
