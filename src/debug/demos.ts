@@ -91,9 +91,45 @@ export const DEMOS = [
   },
   {
     name: "hordeFlank",
-    label: "Horde: Surround",
+    label: "Surround: Standard",
     description:
-      "Two fights side by side, no input needed. On the left, two followers break off on their own and split across both sides of their soldier instead of queueing up on the side they arrived from — the far one walks straight through it to get there. On the right, one follower on its own soldier stays below the threshold and still walks straight at its centre.",
+      "Two fights side by side, no input needed. On the left, two followers break off on their own and split across both sides of their soldier instead of queueing up on the side they arrived from — the one that starts NEAREST is the one sent through to the far side, because that's the assignment that finishes first (the trailer then only has to walk to the near slot it was already heading for). On the right, one follower on its own soldier stays below the threshold and still walks straight at its centre.",
+  },
+  {
+    name: "flankGunner",
+    label: "Surround: Rifleman",
+    description:
+      "The same two-follower gang-up against a Rifleman instead. Watch how little of it you get to see: a Rifleman has 4 HP and two base followers bite for 2 each, so it dies at roughly the same moment the crossing lands (~530ms). Nothing is broken here — the sides are assigned on the first frame and the crosser covers the whole distance; the fight is simply shorter than the walk. Under the old 'tie goes to the side you're already on' rule this one never surrounded at all.",
+  },
+  {
+    name: "flankShield",
+    label: "Surround: Shield (paralyzed)",
+    description:
+      "A Shield Trooper paralyzed first, then ganged up on by two base followers — the intended way to take one. It's the longest surround in the game to watch: 9 HP under a paralyze that stops it hitting back, so the pair get either side of it, park at their standoff facing inward, and stay there for about half a second of biting before it goes down.",
+  },
+  {
+    name: "flankShieldActive",
+    label: "Surround: Shield (no paralyze)",
+    description:
+      "The same gang-up on a Shield Trooper that is still ACTIVE, i.e. the mistake. Its contact damage (2) is exactly a base follower's whole HP, so it one-shots each of them as they arrive and walks away from the fight with 3 HP left. The surround mechanic works fine — the sides still latch — but the horde loses. This is the pressure the paralyze is the answer to, and it's why the demo above exists as a separate scenario.",
+  },
+  {
+    name: "flankBrutes",
+    label: "Surround: Brute pair",
+    description:
+      "Two Brutes on one Shield Trooper. The side assignment is kind-agnostic — the nearer Brute is sent across exactly as a base follower would be — but a Brute bites for 5, so two of them kill a 9 HP Shield in two bites, before the one that was sent round has finished walking. Surrounding is in practice a base-follower manoeuvre: a Brute pair overkills every enemy in the game faster than anyone can get behind it.",
+  },
+  {
+    name: "flankBothSides",
+    label: "Surround: Already either side",
+    description:
+      "Two followers that are already standing on opposite sides of a (paralyzed) Shield Trooper before the fight starts — one of them got there by walking past it. Nobody crosses: the side each takes is the side it is already on, because the far side is covered and nothing is gained by walking through the target. 'The nearest one goes across' only decides the case where everyone arrived from the same side.",
+  },
+  {
+    name: "flankMixed",
+    label: "Surround: Mixed roster",
+    description:
+      "One base follower and one Brute sharing a (paralyzed) Shield Trooper, with the base follower nearest. Two things to look at: the light unit is the one sent across — the rule picks by distance, not by kind or rank — and the two park at different standoffs, 8px for the base follower and 10px for the Brute, each budgeted against its own bite reach so neither loses damage by standing off.",
   },
   {
     name: "death",
@@ -190,7 +226,19 @@ export const DEMO_GROUPS = [
   },
   {
     label: "Horde & aggro",
-    demos: ["aggroReady", "uncappedHorde", "hordeSpread", "hordeFlank"],
+    demos: ["aggroReady", "uncappedHorde", "hordeSpread"],
+  },
+  {
+    label: "Surrounding a soldier",
+    demos: [
+      "hordeFlank",
+      "flankGunner",
+      "flankShield",
+      "flankShieldActive",
+      "flankBothSides",
+      "flankBrutes",
+      "flankMixed",
+    ],
   },
   {
     label: "Fusion & Brutes",

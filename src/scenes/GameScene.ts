@@ -454,6 +454,31 @@ export class GameScene extends Phaser.Scene {
    * rather than shuffling everyone already in place — and never off `rank`,
    * which shifts when a follower ahead dies.
    *
+   * **On a tie, the attacker currently nearest the target is the one that
+   * crosses.** Followers arrive in a conga line from Emily's side, so the
+   * usual case is that every unlatched attacker is on the *same* side and
+   * somebody has to walk through the soldier to reach the other one. Which
+   * one does it decides how long the surround takes to form, and the two
+   * choices are not equal: with attackers at distances d1 < d2 and standoff
+   * `s`, sending the nearest across costs `max(d1 + s, d2 - s)` of travel
+   * while sending the farthest costs `d2 + s`, and the first is never larger.
+   * Sending the farthest — which is what "tie goes to the side you're already
+   * on" produced, because the nearest latches first and claims the near side
+   * — serialises the *longest* approach with the crossing on top of it, and
+   * measured ~100ms slower to surround a STANDARD (624ms vs 528ms); against a
+   * 4hp RIFLEMAN the surround never formed at all before the kill. The cost
+   * is that the leader now walks a little further before its first bite
+   * (~32ms, measured). A follower already standing on the far side is not
+   * asked to cross: the tie-break only fires when every other unlatched
+   * attacker is on this follower's own side.
+   *
+   * Nearest is measured among *unlatched* attackers only — anyone already
+   * latched is a fact, not a candidate — and exact ties resolve by iteration
+   * order of `engaging`, which is the scene's follower array (spawn order),
+   * deliberately not `rank`. Only one follower can ever reach this branch per
+   * frame per target anyway: the first to latch makes the side counts uneven
+   * for everyone behind it in the same pass.
+   *
    * Below FLANK.minEngagers nobody flanks; a lone follower walks at the
    * soldier's centre exactly as before. Crossing the threshold is one-way:
    * a follower that took a side keeps it when its partner dies, because
@@ -461,21 +486,35 @@ export class GameScene extends Phaser.Scene {
    * exists to prevent. */
   private flankSlotX(follower: Follower, target: Soldier, engaging: Map<Follower, Soldier>): number {
     if (follower.flankSide === 0) {
+      const ownSide = (Math.sign(follower.x - target.x) || 1) as -1 | 1;
       let attackers = 0;
       let left = 0;
       let right = 0;
+      let someoneElseOnFarSide = false;
+      let nearestUnlatchedDist = Math.abs(follower.x - target.x);
+      let followerIsNearestUnlatched = true;
       engaging.forEach((t, other) => {
         if (t !== target) return;
         attackers++;
         if (other === follower) return;
-        if (other.flankSide === -1) left++;
-        else if (other.flankSide === 1) right++;
+        if (other.flankSide === -1) {
+          left++;
+          return;
+        }
+        if (other.flankSide === 1) {
+          right++;
+          return;
+        }
+        // Unlatched peer: a candidate for "who crosses", and evidence about
+        // whether the far side is going to be covered by somebody standing
+        // there already.
+        if ((Math.sign(other.x - target.x) || 1) !== ownSide) someoneElseOnFarSide = true;
+        else if (Math.abs(other.x - target.x) < nearestUnlatchedDist) followerIsNearestUnlatched = false;
       });
       if (attackers >= FLANK.minEngagers) {
-        // Tie goes to the side the follower is already on, so nobody crosses
-        // the soldier without a reason to.
+        const crosses = !someoneElseOnFarSide && followerIsNearestUnlatched;
         follower.flankSide =
-          left < right ? -1 : right < left ? 1 : ((Math.sign(follower.x - target.x) || 1) as -1 | 1);
+          left < right ? -1 : right < left ? 1 : ((crosses ? -ownSide : ownSide) as -1 | 1);
       }
     }
 
@@ -964,10 +1003,10 @@ export class GameScene extends Phaser.Scene {
         // Two fights at once, because the interesting claim is the contrast.
         //
         // Left: exactly FLANK.minEngagers followers on one soldier, so they
-        // split one to each side and the far one walks through it to get
-        // there. Two rather than four on purpose — four base followers deal
-        // 8 damage in their first volley and a 6hp STANDARD would be dead
-        // before it could be seen surrounded at all.
+        // split one to each side and the *nearer* one walks through it to
+        // reach the far slot. Two rather than four on purpose — four base
+        // followers deal 8 damage in their first volley and a 6hp STANDARD
+        // would be dead before it could be seen surrounded at all.
         [-10, -25].forEach((dx) => {
           this.spawnFollowerNear(dx).hasJoined = true;
         });
@@ -978,6 +1017,73 @@ export class GameScene extends Phaser.Scene {
         // — 150px apart, so nothing crosses over.
         this.spawnFollowerNear(200).hasJoined = true;
         this.spawnSoldierNear(240);
+        break;
+      }
+      // The four demos below are the same gang-up against the rest of the
+      // roster — the surround's behaviour is not one scenario's worth of
+      // claim, because how much of it is visible depends entirely on how
+      // long the target survives the volley that's converging on it.
+      case "flankGunner": {
+        // Same geometry as hordeFlank's left-hand fight, so the two read
+        // against each other: the only variable is the target's 4hp.
+        [-10, -25].forEach((dx) => {
+          this.spawnFollowerNear(dx).hasJoined = true;
+        });
+        this.spawnSoldierNear(50, "RIFLEMAN");
+        break;
+      }
+      case "flankShield": {
+        // Paralyzed on purpose: a SHIELD's contactDamage (2) is a base
+        // follower's entire hp, so this is the only way a pair of them
+        // survives long enough to be seen surrounding anything — and it is
+        // also how the enemy is meant to be taken. 9hp under the
+        // defenseless multiplier still takes three base bites, which is the
+        // longest surround window in the game.
+        [-10, -25].forEach((dx) => {
+          this.spawnFollowerNear(dx).hasJoined = true;
+        });
+        this.spawnSoldierNear(50, "SHIELD").paralyze();
+        break;
+      }
+      case "flankShieldActive": {
+        // Deliberately the losing version of the demo above — same pair,
+        // same distances, no paralyze. Kept as its own scenario because
+        // "the horde loses this fight" is an intended balance fact worth
+        // failing loudly if anyone quietly retunes it.
+        [-10, -25].forEach((dx) => {
+          this.spawnFollowerNear(dx).hasJoined = true;
+        });
+        this.spawnSoldierNear(50, "SHIELD");
+        break;
+      }
+      case "flankBothSides": {
+        // One follower on Emily's side, one already past the soldier — the
+        // shape the horde ends up in whenever a fight starts after somebody
+        // has walked through, which is common after a rush. Nothing here
+        // should cross: the assignment rule only sends a follower across
+        // when the far side is otherwise uncovered.
+        this.spawnFollowerNear(-10).hasJoined = true;
+        this.spawnFollowerNear(110).hasJoined = true;
+        this.spawnSoldierNear(50, "SHIELD").paralyze();
+        break;
+      }
+      case "flankBrutes": {
+        // The toughest enemy in the game (9hp) against the heaviest pair of
+        // followers, which is still only two Brute bites.
+        [-10, -25].forEach((dx) => {
+          this.spawnFollowerNear(dx, "BRUTE").hasJoined = true;
+        });
+        this.spawnSoldierNear(50, "SHIELD");
+        break;
+      }
+      case "flankMixed": {
+        // Base follower nearest, Brute behind it, so the rule has to send
+        // the *lighter, faster* unit across — picking by distance rather
+        // than by kind or rank. Paralyzed so the base follower isn't
+        // one-shot before the two standoffs can be compared.
+        this.spawnFollowerNear(-10).hasJoined = true;
+        this.spawnFollowerNear(-25, "BRUTE").hasJoined = true;
+        this.spawnSoldierNear(50, "SHIELD").paralyze();
         break;
       }
       case "hordeSpread": {

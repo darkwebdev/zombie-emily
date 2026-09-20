@@ -1,9 +1,11 @@
 import Phaser from "phaser";
-import { BACKGROUND, CHARACTER_ART, COMBAT, EMILY, FLANK, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
+import { BACKGROUND, BRUTE, CHARACTER_ART, COMBAT, EMILY, FLANK, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
 import { EMILY_ANIM } from "../entities/Emily";
 import { SPAWNS } from "../levels/level1";
 import { touchInput } from "../systems/touchControls";
 import type { DemoName } from "./demos";
+import type { Follower } from "../entities/Follower";
+import type { Soldier } from "../entities/Soldier";
 import type { GameScene } from "../scenes/GameScene";
 
 /** One concrete, named fact checked during a test — rendered as its own
@@ -40,6 +42,156 @@ export interface TestCase {
  * this is that common case, `steps` frames (at 16ms each) after run(). */
 function single(steps: number, assert: (scene: GameScene) => Check[]): Checkpoint[] {
   return [{ afterMs: steps * 16, assert }];
+}
+
+/** Everything the surround tests record, sampled once per frame.
+ *
+ * Every one of these facts is transient: a surround only exists while the
+ * target is alive, and the fights it exists in last a few hundred ms. A
+ * checkpoint can only see where things ended up — by which time the soldier
+ * is usually dead and the followers have released their sides — so anything
+ * about "was it ever true" or "how long did it take" has to be accumulated
+ * frame by frame instead. (docs/TESTING.md, "if the thing you're asserting is
+ * transient, sample every frame".) */
+interface FlankObs {
+  /** Most followers seen engaging the watched target at once. */
+  attackersSeen: number;
+  /** Attackers stood on both sides of the target at least once while alive. */
+  everSurrounded: boolean;
+  /** ...and every one of them was inside its own kind's bite reach. */
+  everSurroundedInRange: boolean;
+  /** When that first happened — so a test can say how long the surround was
+   * actually on screen for, rather than only that it happened at all. */
+  surroundedInRangeMs: number | null;
+  /** ...and every one of them was facing inward at the target. */
+  everFacedInward: boolean;
+  firstBiteMs: number | null;
+  killMs: number | null;
+  /** Per watched follower, the closest it ever got to the flank slot its own
+   * kind and latched side put it at — the check that a follower actually
+   * parks where the surround says it should, rather than merely ending up on
+   * the correct side of the target by drifting through it. */
+  minSlotGap: number[];
+  /** Per watched follower, how far it got from where it started toward that
+   * slot, 0..1. The honest measure for fights that end mid-crossing. */
+  crossProgress: number[];
+  /** Per watched follower, whether it was still alive at the last sample. */
+  survived: boolean[];
+  /** The watched followers, in the order the scene held them at install. */
+  watched: Follower[];
+}
+
+/** Installs the per-frame sampler above for one soldier, and stashes the
+ * result on the scene so checkpoints can read it back. Call from a test's
+ * `run` hook, which fires after the demo's own setup. */
+function watchFlank(scene: GameScene, target: Soldier): FlankObs {
+  const watched = [...scene.getTestSnapshot().followers];
+  const obs: FlankObs = {
+    attackersSeen: 0,
+    everSurrounded: false,
+    everSurroundedInRange: false,
+    surroundedInRangeMs: null,
+    everFacedInward: false,
+    firstBiteMs: null,
+    killMs: null,
+    minSlotGap: watched.map(() => Infinity),
+    crossProgress: watched.map(() => 0),
+    survived: watched.map(() => true),
+    watched,
+  };
+  const startX = watched.map((f) => f.x);
+  const startHp = target.hp;
+  const t0 = scene.time.now;
+  // The slot a follower is steering at, rebuilt from tuning exactly as
+  // GameScene.flankSlotX does — per kind, so a Brute is never checked
+  // against a base follower's standoff.
+  const slotX = (f: Follower) => target.x + f.flankSide * (f.stats.flankStandoff + f.flankJitter);
+  scene.events.on(Phaser.Scenes.Events.POST_UPDATE, () => {
+    const ms = scene.time.now - t0;
+    const alive = target.active && target.hp > 0;
+    const live = scene.getTestSnapshot().followers;
+    watched.forEach((f, i) => {
+      obs.survived[i] = live.includes(f);
+    });
+    if (!alive) {
+      if (obs.killMs === null) obs.killMs = ms;
+      return;
+    }
+    if (target.hp < startHp && obs.firstBiteMs === null) obs.firstBiteMs = ms;
+    const on = live.filter((f) => f.flankTarget === target);
+    obs.attackersSeen = Math.max(obs.attackersSeen, on.length);
+    on.forEach((f) => {
+      const i = watched.indexOf(f);
+      if (i < 0 || f.flankSide === 0) return;
+      const gap = Math.abs(f.x - slotX(f));
+      obs.minSlotGap[i] = Math.min(obs.minSlotGap[i], gap);
+      const total = Math.abs(startX[i] - slotX(f));
+      obs.crossProgress[i] = Math.max(obs.crossProgress[i], total === 0 ? 1 : 1 - gap / total);
+    });
+    if (on.some((f) => f.x < target.x) && on.some((f) => f.x > target.x)) {
+      obs.everSurrounded = true;
+      const inRange = on.every(
+        (f) =>
+          Phaser.Math.Distance.Between(f.x, f.y, target.x, target.y) <=
+          Math.max(COMBAT.contactRange, f.stats.reach),
+      );
+      if (inRange) {
+        obs.everSurroundedInRange = true;
+        if (obs.surroundedInRangeMs === null) obs.surroundedInRangeMs = ms;
+      }
+      if (on.every((f) => f.flipX === f.x > target.x)) obs.everFacedInward = true;
+    }
+  });
+  (scene as unknown as { __flankObs?: FlankObs }).__flankObs = obs;
+  return obs;
+}
+
+function readFlank(scene: GameScene): FlankObs {
+  return (scene as unknown as { __flankObs: FlankObs }).__flankObs;
+}
+
+/** The side-assignment claims, all of which are settled on the very first
+ * frame both followers see the same target — long before anyone has walked
+ * anywhere. Asserting them from the latch rather than from where bodies
+ * ended up is what proves the *rule*, and it's the only part of a surround
+ * that's checkable against a target that dies in half a second.
+ *
+ * `nearestIsFirst` says which of the two spawned followers is the one
+ * standing closer to the target, so the test states its own expectation
+ * rather than deriving it from the thing under test. */
+function assignmentChecks(scene: GameScene, target: Soldier): Check[] {
+  const on = scene.getTestSnapshot().followers.filter((f) => f.flankTarget === target);
+  const sides = on.map((f) => f.flankSide).sort();
+  const byDistance = [...on].sort(
+    (a, b) => Math.abs(a.x - target.x) - Math.abs(b.x - target.x),
+  );
+  const nearest = byDistance[0];
+  const ownSide = nearest ? Math.sign(nearest.x - target.x) || 1 : 0;
+  return [
+    {
+      label: `All ${FLANK.minEngagers} followers picked up the same target`,
+      pass: on.length === FLANK.minEngagers,
+      detail: `attackers=${on.length}`,
+    },
+    {
+      // Both spawn on Emily's side, so "whichever side has fewer" is the
+      // only thing that can split them — a nearest-side rule would put both
+      // on the near one and never surround anything.
+      label: "They split one to each side rather than both taking the near one",
+      pass: sides.length === 2 && sides[0] === -1 && sides[1] === 1,
+      detail: `sides=${sides.join(",")}`,
+    },
+    {
+      // The rule this repo picked over "tie goes to the side you're already
+      // on": sending the nearest across costs max(d1+s, d2-s) of travel,
+      // sending the farthest costs d2+s, and the first is never larger. The
+      // old rule always produced the second, because the nearest latched
+      // first and claimed the near side.
+      label: "The follower standing NEAREST is the one sent across to the far side",
+      pass: !!nearest && nearest.flankSide === -ownSide,
+      detail: `nearest kind=${nearest?.kind} ownSide=${ownSide} side=${nearest?.flankSide}`,
+    },
+  ];
 }
 
 /** At least one test per demo in demos.ts — each drives that exact scenario
@@ -933,20 +1085,15 @@ export const TESTS: TestCase[] = [
           const { followers, soldiers } = scene.getTestSnapshot();
           const ganged = followers.filter((f) => f.flankTarget === soldiers[0]);
           const solo = followers.filter((f) => f.flankTarget === soldiers[1]);
-          const sides = ganged.map((f) => f.flankSide).sort();
           return [
+            // Attacker count, the split across both sides, and which of the
+            // two is sent across — the same three facts every other surround
+            // test opens with, so a rule change fails identically everywhere.
+            ...assignmentChecks(scene, soldiers[0]),
             {
-              label: `Both fights picked up: ${FLANK.minEngagers} on one soldier, 1 on the other`,
+              label: "Both fights picked up: the pair on one soldier, 1 on the other",
               pass: ganged.length === FLANK.minEngagers && solo.length === 1,
               detail: `ganged=${ganged.length} solo=${solo.length}`,
-            },
-            {
-              // Both spawn on Emily's side, so "whichever side has fewer"
-              // is the only thing that can split them — a nearest-side rule
-              // would put both on the near one and never surround anything.
-              label: "The pair split one to each side rather than both taking the near one",
-              pass: sides.length === 2 && sides[0] === -1 && sides[1] === 1,
-              detail: `sides=${sides.join(",")}`,
             },
             {
               // The threshold is meant literally — one zombie surrounds
@@ -1001,6 +1148,361 @@ export const TESTS: TestCase[] = [
               label: "It committed to a facing instead of strobing between them",
               pass: obs.flips <= Math.ceil(1.4 / SOLDIER.turnCooldown) + 1,
               detail: `flips=${obs.flips} cooldown=${SOLDIER.turnCooldown}s`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  // The four cases below are the same mechanic against the rest of the
+  // roster. They exist because "does the surround work" turned out not to
+  // have one answer: the assignment is identical everywhere, but how much of
+  // it is ever visible depends on whether the target outlives the walk, and
+  // that varies by a factor of four across the enemy kinds.
+  {
+    demo: "flankGunner",
+    name: "A Rifleman gets flanked correctly, and dies before the walk finishes",
+    run: (scene) => {
+      watchFlank(scene, scene.getTestSnapshot().soldiers[0]);
+    },
+    checkpoints: [
+      { afterMs: 3 * 16, assert: (scene) => assignmentChecks(scene, scene.getTestSnapshot().soldiers[0]) },
+      {
+        afterMs: 900,
+        assert: (scene) => {
+          const obs = readFlank(scene);
+          const crosser = obs.watched.findIndex((f, i) => obs.crossProgress[i] > 0 && f.x > 0);
+          const bestProgress = Math.max(...obs.crossProgress);
+          // 2 bites of FOLLOWER.biteDamage (2) each cover RIFLEMAN.hp (4),
+          // and both land in the first volley — so the whole fight is one
+          // bite cooldown long no matter how the sides were assigned.
+          const budgetMs = 700;
+          return [
+            {
+              label: `The gunner died inside ${budgetMs}ms (${RIFLEMAN.hp}hp vs ${FLANK.minEngagers} x ${FOLLOWER.biteDamage} damage)`,
+              pass: obs.killMs !== null && obs.killMs <= budgetMs,
+              detail: `killMs=${obs.killMs} firstBiteMs=${obs.firstBiteMs}`,
+            },
+            {
+              // The honest version of "does it surround a Rifleman": the
+              // crossing is not slow or broken, it is simply longer than the
+              // fight. Progress, not arrival, is the claim this scenario can
+              // actually support — measured ~99% complete at the kill.
+              label: "The follower sent across had covered >=90% of the way to its far slot by then",
+              pass: bestProgress >= 0.9,
+              detail: `progress=${bestProgress.toFixed(2)} crosser=${crosser}`,
+            },
+            {
+              // RIFLEMAN.aimDuration (0.9s) is longer than the fight, and
+              // its contactDamage is 0 — so a gang-up on a gunner is free.
+              label: "Both followers survived it (contactDamage 0, and it never finished a windup)",
+              pass: obs.survived.every(Boolean),
+              detail: `survived=${obs.survived.join(",")}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "flankShield",
+    name: "A paralyzed Shield Trooper is surrounded, in range, for half a second",
+    run: (scene) => {
+      watchFlank(scene, scene.getTestSnapshot().soldiers[0]);
+    },
+    checkpoints: [
+      { afterMs: 3 * 16, assert: (scene) => assignmentChecks(scene, scene.getTestSnapshot().soldiers[0]) },
+      {
+        afterMs: 1300,
+        assert: (scene) => {
+          const obs = readFlank(scene);
+          const held = obs.killMs !== null && obs.surroundedInRangeMs !== null
+            ? obs.killMs - obs.surroundedInRangeMs
+            : 0;
+          return [
+            {
+              label: "Both sides were held with both followers inside their own bite reach",
+              pass: obs.everSurroundedInRange,
+              detail: `atMs=${obs.surroundedInRangeMs}`,
+            },
+            {
+              // The one that crossed arrives travelling away from its target;
+              // faceToward is what turns it back round.
+              label: "Both faced inward while doing it",
+              pass: obs.everFacedInward,
+              detail: `faced=${obs.everFacedInward}`,
+            },
+            {
+              // The whole reason this demo paralyzes first: a 9hp target
+              // under the defenseless multiplier still needs three base
+              // bites, so the surround is on screen for a real length of
+              // time instead of one frame. This is the longest window the
+              // current roster can produce.
+              label: "And held it for >=300ms rather than a single frame",
+              pass: held >= 300,
+              detail: `heldMs=${held} killMs=${obs.killMs}`,
+            },
+            {
+              // Not "they ended up either side of it" — they parked at the
+              // slot the standoff puts them at. A follower that drifted
+              // through the target would satisfy the side check and fail
+              // this one.
+              label: "Each parked within its deadzone of its own flank slot",
+              pass: obs.minSlotGap.every((g) => g <= FOLLOWER.deadzone),
+              detail: `gaps=${obs.minSlotGap.map((g) => g.toFixed(1)).join(",")}`,
+            },
+            {
+              label: "Both survived — a paralyzed soldier can't hit back",
+              pass: obs.survived.every(Boolean),
+              detail: `survived=${obs.survived.join(",")}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "flankBothSides",
+    name: "Followers already either side of a target are not asked to cross",
+    // "Nearest crosses" is only the tie-break for the usual case, where
+    // everyone arrives from Emily's side and the far side is uncovered. When
+    // somebody is already standing round the back, the cheapest assignment
+    // is for nobody to move at all — a rule that always sent the nearest
+    // across would walk this pair through each other for no reason, and
+    // would undo the very thing it is supposed to produce.
+    //
+    // This is its own demo rather than a second test on flankShield because
+    // a test's run() hook fires several frames after the demo's setup, by
+    // which time the sides have already latched — moving a follower then
+    // would prove nothing about how the side was chosen.
+    run: (scene) => {
+      watchFlank(scene, scene.getTestSnapshot().soldiers[0]);
+    },
+    checkpoints: [
+      {
+        afterMs: 3 * 16,
+        assert: (scene) => {
+          const { followers, soldiers } = scene.getTestSnapshot();
+          const target = soldiers[0];
+          const on = followers.filter((f) => f.flankTarget === target);
+          const keptOwnSide = on.every((f) => f.flankSide === (Math.sign(f.x - target.x) || 1));
+          const sides = on.map((f) => f.flankSide).sort();
+          return [
+            {
+              label: "Both engage it, from opposite sides to begin with",
+              pass:
+                on.length === FLANK.minEngagers &&
+                on.some((f) => f.x < target.x) &&
+                on.some((f) => f.x > target.x),
+              detail: `attackers=${on.length} dx=${on.map((f) => (f.x - target.x).toFixed(0)).join(",")}`,
+            },
+            {
+              label: "Neither is sent across — each latches the side it is already on",
+              pass: keptOwnSide && sides.length === 2 && sides[0] === -1 && sides[1] === 1,
+              detail: `sides=${sides.join(",")} keptOwnSide=${keptOwnSide}`,
+            },
+          ];
+        },
+      },
+      {
+        afterMs: 1300,
+        assert: (scene) => {
+          const obs = readFlank(scene);
+          return [
+            {
+              // The pay-off of not crossing: because neither has to walk
+              // round, both are in contact on opposite sides from the moment
+              // they arrive, which is the earliest a surround can possibly
+              // form.
+              label: "Both closed into their own bite reach on opposite sides",
+              pass: obs.everSurroundedInRange,
+              detail: `atMs=${obs.surroundedInRangeMs} killMs=${obs.killMs}`,
+            },
+            {
+              label: "Each parked within its deadzone of its own flank slot",
+              pass: obs.minSlotGap.every((g) => g <= FOLLOWER.deadzone),
+              detail: `gaps=${obs.minSlotGap.map((g) => g.toFixed(1)).join(",")}`,
+            },
+            {
+              label: "Both faced inward",
+              pass: obs.everFacedInward,
+              detail: `faced=${obs.everFacedInward}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "flankShieldActive",
+    name: "Base followers ganging an un-paralyzed Shield Trooper lose the fight",
+    run: (scene) => {
+      watchFlank(scene, scene.getTestSnapshot().soldiers[0]);
+    },
+    checkpoints: [
+      { afterMs: 3 * 16, assert: (scene) => assignmentChecks(scene, scene.getTestSnapshot().soldiers[0]) },
+      {
+        afterMs: 1800,
+        assert: (scene) => {
+          const obs = readFlank(scene);
+          const shield = scene.getTestSnapshot().soldiers[0];
+          // Three bites land before the second follower dies; the numbers are
+          // read from tuning so a retune fails this loudly instead of
+          // silently changing what the fight means.
+          const expectedHp = SHIELD_TROOPER.hp - 3 * FOLLOWER.biteDamage;
+          return [
+            {
+              label: `One contact hit is a whole base follower (contactDamage ${SHIELD_TROOPER.contactDamage} >= hp ${FOLLOWER.hp})`,
+              pass: SHIELD_TROOPER.contactDamage >= FOLLOWER.hp,
+              detail: `${SHIELD_TROOPER.contactDamage} vs ${FOLLOWER.hp}`,
+            },
+            {
+              label: "Both followers died",
+              pass: obs.survived.every((s) => !s),
+              detail: `survived=${obs.survived.join(",")}`,
+            },
+            {
+              label: `The Shield walked away alive on ${expectedHp}hp`,
+              pass: shield?.active === true && shield.hp === expectedHp,
+              detail: `hp=${shield?.hp} expected=${expectedHp}`,
+            },
+            {
+              // The mechanic is not what loses this fight — the sides latch
+              // exactly as they do in every other scenario (asserted at the
+              // checkpoint above). What the pair never gets is the *time* to
+              // stand on both sides at once. Intended: the answer to a
+              // Shield is a paralyze first, not more bodies.
+              label: "Neither lived long enough to hold both sides in contact at once",
+              pass: !obs.everSurroundedInRange,
+              detail: `everInRange=${obs.everSurroundedInRange}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "flankBrutes",
+    name: "Brutes take sides the same way, then kill the target before the crossing lands",
+    run: (scene) => {
+      watchFlank(scene, scene.getTestSnapshot().soldiers[0]);
+    },
+    checkpoints: [
+      { afterMs: 3 * 16, assert: (scene) => assignmentChecks(scene, scene.getTestSnapshot().soldiers[0]) },
+      {
+        afterMs: 900,
+        assert: (scene) => {
+          const obs = readFlank(scene);
+          const bothBrutes = obs.watched.every((f) => f.kind === "BRUTE");
+          const budgetMs = 700;
+          return [
+            {
+              label: "The roster under test really is two Brutes",
+              pass: bothBrutes && obs.watched.length === FLANK.minEngagers,
+              detail: `kinds=${obs.watched.map((f) => f.kind).join(",")}`,
+            },
+            {
+              // Two bites, not three: this is why nothing in the current
+              // roster can be seen surrounded by Brutes, and it's a tuning
+              // fact rather than a flanking one.
+              label: `Two Brute bites (${BRUTE.biteDamage} each) cover the toughest enemy in the game (${SHIELD_TROOPER.hp}hp)`,
+              pass: 2 * BRUTE.biteDamage >= SHIELD_TROOPER.hp,
+              detail: `${2 * BRUTE.biteDamage} vs ${SHIELD_TROOPER.hp}`,
+            },
+            {
+              label: `So the Shield died inside ${budgetMs}ms`,
+              pass: obs.killMs !== null && obs.killMs <= budgetMs,
+              detail: `killMs=${obs.killMs} firstBiteMs=${obs.firstBiteMs}`,
+            },
+            {
+              // Recorded as the honest outcome, not as a defect: the sides
+              // are assigned correctly (checkpoint above) and the crossing is
+              // under way, but BRUTE.speed (105) over standoff+distance is
+              // slower than two bites. If a future retune makes this pass
+              // differently, the ruling on it should be revisited too.
+              label: "But the pair never held both sides in contact — it died mid-crossing",
+              pass: !obs.everSurroundedInRange,
+              detail: `everInRange=${obs.everSurroundedInRange} progress=${obs.crossProgress.map((p) => p.toFixed(2)).join(",")}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "flankMixed",
+    name: "A mixed roster crosses by distance, and each kind keeps its own standoff",
+    run: (scene) => {
+      watchFlank(scene, scene.getTestSnapshot().soldiers[0]);
+    },
+    checkpoints: [
+      {
+        afterMs: 3 * 16,
+        assert: (scene) => {
+          const target = scene.getTestSnapshot().soldiers[0];
+          const on = scene.getTestSnapshot().followers.filter((f) => f.flankTarget === target);
+          const base = on.find((f) => f.kind === "BASE");
+          const brute = on.find((f) => f.kind === "BRUTE");
+          const baseOwnSide = base ? Math.sign(base.x - target.x) || 1 : 0;
+          return [
+            ...assignmentChecks(scene, target),
+            {
+              // The nearest here is deliberately the *lighter* unit, so this
+              // fails if the rule ever starts preferring a kind (or a rank)
+              // over plain distance.
+              label: "The light unit is the one sent across, and the Brute keeps the near side",
+              pass:
+                !!base && !!brute && base.flankSide === -baseOwnSide && brute.flankSide === baseOwnSide,
+              detail: `base=${base?.flankSide} brute=${brute?.flankSide} baseOwnSide=${baseOwnSide}`,
+            },
+          ];
+        },
+      },
+      {
+        afterMs: 900,
+        assert: (scene) => {
+          const obs = readFlank(scene);
+          const baseIdx = obs.watched.findIndex((f) => f.kind === "BASE");
+          // The inequality documented on FOLLOWER.flankStandoff, checked per
+          // kind rather than trusted: a follower's worst-case vertical offset
+          // from a soldier's own line is the top of the horde band plus that
+          // kind's spawnYOffset, and the slot has to stay inside the circle
+          // its reach cuts at that height. This is the guard that surrounding
+          // never silently costs damage.
+          const budget = (s: typeof FOLLOWER) => {
+            const dy = HORDE_SPREAD.yBand + s.spawnYOffset;
+            return {
+              need: s.flankStandoff + s.deadzone + Math.max(...FLANK.sideJitter.map(Math.abs)),
+              have: Math.sqrt(s.reach * s.reach - dy * dy),
+            };
+          };
+          const b = budget(FOLLOWER);
+          const r = budget(BRUTE);
+          return [
+            {
+              label: "The base follower parked on the far side at its own standoff",
+              pass: baseIdx >= 0 && obs.minSlotGap[baseIdx] <= FOLLOWER.deadzone,
+              detail: `gap=${obs.minSlotGap[baseIdx]?.toFixed(1)} standoff=${FOLLOWER.flankStandoff}`,
+            },
+            {
+              label: "The two kinds stand off by different amounts, from their own stats",
+              pass: BRUTE.flankStandoff !== FOLLOWER.flankStandoff,
+              detail: `base=${FOLLOWER.flankStandoff} brute=${BRUTE.flankStandoff}`,
+            },
+            {
+              label: "A base follower's slot stays inside its own bite reach",
+              pass: b.need <= b.have,
+              detail: `${b.need.toFixed(1)} <= ${b.have.toFixed(1)}`,
+            },
+            {
+              label: "A Brute's slot stays inside its own (longer) bite reach",
+              pass: r.need <= r.have,
+              detail: `${r.need.toFixed(1)} <= ${r.have.toFixed(1)}`,
+            },
+            {
+              label: "The fight got far enough for both to be engaging it at once",
+              pass: obs.attackersSeen === FLANK.minEngagers,
+              detail: `attackersSeen=${obs.attackersSeen}`,
             },
           ];
         },
