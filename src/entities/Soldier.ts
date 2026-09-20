@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { CHARACTER_FRONT_DEPTH, ENEMY_STATS, EnemyKind, SHIELD_FLASH_DURATION, SOLDIER } from "../config/tuning";
 import { CHARACTER_TEXTURE, applyCharacterArt } from "./characterArt";
+import { CharacterLayerStack } from "./characterLayers";
 
 // The art is already coloured per kind, so the base "tint" is white: no tint
 // at all. The state tints below still multiply over it, which is the whole
@@ -45,6 +46,10 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
    * it starts responding, instead of every frame. */
   respondingToCall = false;
 
+  /** Extra images drawn over this soldier (see characterLayers.ts). Empty
+   * for today's single-layer art. */
+  readonly layers!: CharacterLayerStack;
+
   private paralyzeRemaining = 0;
   private recoveringRemaining = 0;
   private shieldFlashRemaining = 0;
@@ -57,6 +62,9 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
     (this.body as Phaser.Physics.Arcade.Body).setAllowGravity(false);
     (this.body as Phaser.Physics.Arcade.Body).setImmovable(true);
     applyCharacterArt(this, kind);
+    // Built after applyCharacterArt so the first sync copies the seated
+    // origin and scale rather than the raw defaults.
+    this.layers = new CharacterLayerStack(scene, this, kind);
     // Feet on the canonical ground line, but drawn in front of the horde
     // rather than sorted into it — a soldier buried under a swarm hides the
     // paralyze/aim tints the player reads it by. See CHARACTER_FRONT_DEPTH.
@@ -240,4 +248,11 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
+  /** Phaser tears down this sprite, but the overlay sprites are separate
+   * scene objects — without this they would outlive the soldier and hang in
+   * the air after it converts or dies. */
+  destroy(fromScene?: boolean): void {
+    this.layers?.destroy();
+    super.destroy(fromScene);
+  }
 }

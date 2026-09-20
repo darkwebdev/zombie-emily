@@ -17,6 +17,8 @@ import { pinToScreen } from "../systems/screenPin";
 import { touchInput } from "../systems/touchControls";
 import { SPAWNS } from "../levels/level1";
 import { applyHitboxes } from "../debug/hitboxes";
+import { CHARACTER_TEXTURE } from "../entities/characterArt";
+import { DEBUG_LAYER_TEXTURE, createDebugLayerTexture } from "../entities/characterLayers";
 
 interface PendingConversion {
   soldier: Soldier;
@@ -302,7 +304,22 @@ export class GameScene extends Phaser.Scene {
       this.showCleared();
     }
 
+    // Last, so every overlay copies the transform, tint and depth its
+    // character ends the frame with. In particular this must follow the
+    // follower depth pass, which rewrites depth per frame for flank front
+    // slots — syncing before it would leave a layered follower's overlays a
+    // frame behind, drawn into the lane its body just left.
+    this.syncCharacterLayers();
+
     this.updateDebugLabels();
+  }
+
+  /** Glues every character's overlay images to it (characterLayers.ts). A
+   * no-op for single-layer kinds, which is all of them until #37's modular
+   * art lands. */
+  private syncCharacterLayers(): void {
+    for (const s of this.soldiers) s.layers.sync();
+    for (const f of this.followers) f.layers.sync();
   }
 
   /** Labels that would land close enough on X to overlap get stacked
@@ -1191,6 +1208,22 @@ export class GameScene extends Phaser.Scene {
         // follower's engageRadius (BRUTE's 200) so nothing breaks off to
         // fight while the line-up is being looked at.
         this.spawnSoldierNear(260);
+        break;
+      }
+      case "artLayers": {
+        // One generated placeholder standing in for the modular art #37 will
+        // produce, sized off a real figure so it honours the same-canvas
+        // contract the authored layers will have to.
+        createDebugLayerTexture(this, CHARACTER_TEXTURE.STANDARD);
+        const facingRight = this.spawnSoldierNear(-52, "STANDARD");
+        facingRight.faceToward(facingRight.x + 100, true);
+        const flipped = this.spawnSoldierNear(10, "STANDARD");
+        flipped.faceToward(flipped.x - 100, true);
+        const tinted = this.spawnSoldierNear(72, "STANDARD");
+        tinted.paralyze();
+        for (const s of [facingRight, flipped, tinted]) {
+          s.layers.addLayer({ texture: DEBUG_LAYER_TEXTURE });
+        }
         break;
       }
       case "death": {

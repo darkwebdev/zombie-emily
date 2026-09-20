@@ -1,12 +1,16 @@
 import Phaser from "phaser";
 import { FLANK, FOLLOWER, FOLLOWER_STATS, FollowerKind, GROUND_LINE, HORDE_SPREAD } from "../config/tuning";
 import { CHARACTER_TEXTURE, applyCharacterArt } from "./characterArt";
+import { CharacterLayerStack } from "./characterLayers";
 import { Soldier } from "./Soldier";
 
 export type FollowerMode = "FOLLOW" | "RUSH";
 
 export class Follower extends Phaser.Physics.Arcade.Sprite {
   rank: number;
+  /** Extra images drawn over this follower (see characterLayers.ts). Empty
+   * for today's single-layer art. */
+  readonly layers!: CharacterLayerStack;
   readonly kind: FollowerKind;
   readonly stats: typeof FOLLOWER;
   hp: number;
@@ -87,6 +91,10 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
     // originY would cancel the offset out and it would render in exactly the
     // same place it did before.
     applyCharacterArt(this, kind, GROUND_LINE + depthOffset);
+    // After applyCharacterArt so the first sync copies the seated origin —
+    // which for a follower is solved against its own band line, not the
+    // global one, and the overlays have to inherit exactly that.
+    this.layers = new CharacterLayerStack(scene, this, kind);
     this.depthOffset = depthOffset;
     this.xJitter = xOffsets[wrap(seed, xOffsets.length)];
     this.flankJitter = FLANK.sideJitter[wrap(seed, FLANK.sideJitter.length)];
@@ -181,5 +189,13 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
   takeDamage(amount: number): boolean {
     this.hp -= amount;
     return this.hp <= 0;
+  }
+
+  /** Overlay sprites are separate scene objects, so they need tearing down
+   * with their follower — otherwise they'd be left floating where one died
+   * or fused. */
+  destroy(fromScene?: boolean): void {
+    this.layers?.destroy();
+    super.destroy(fromScene);
   }
 }

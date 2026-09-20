@@ -25,6 +25,12 @@ export const DEMOS = [
       "Replays the one-shot throw animation on a loop, standing still. Cosmetic only — no ammo is spent and no limb is spawned, so the cycle can be watched as long as you like.",
   },
   {
+    name: "artLayers",
+    label: "Art: Layers",
+    description:
+      "Runtime-composited characters (#37). Three soldiers each carry a second image stacked over the body: one facing right, one flipped, and one paralyzed. Proves the overlay follows position and facing, mirrors with the flip, and takes the state tint — the modular art itself doesn't exist yet, so the layer is a generated placeholder band.",
+  },
+  {
     name: "artRoster",
     label: "Art: Roster",
     description:
@@ -220,7 +226,7 @@ export type DemoName = (typeof DEMOS)[number]["name"];
 export const DEMO_GROUPS = [
   {
     label: "Animation",
-    demos: ["animIdle", "animWalk", "animThrow", "artRoster"],
+    demos: ["animIdle", "animWalk", "animThrow", "artRoster", "artLayers"],
   },
   {
     label: "Core loop",

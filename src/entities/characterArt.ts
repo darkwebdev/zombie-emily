@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { CHARACTER_ART, EnemyKind, FollowerKind, GROUND_LINE } from "../config/tuning";
+import { CHARACTER_LAYERS } from "./characterLayers";
 
 import standardUrl from "../assets/enemy-standard.png";
 import shieldUrl from "../assets/enemy-shield.png";
@@ -7,15 +8,16 @@ import riflemanUrl from "../assets/enemy-rifleman.png";
 import baseUrl from "../assets/follower-base.png";
 import bruteUrl from "../assets/follower-brute.png";
 
-/** Texture key per character kind. Enemy and follower kinds share one
- * namespace here because they share one board and one loader. */
-export const CHARACTER_TEXTURE: Record<EnemyKind | FollowerKind, string> = {
-  STANDARD: "enemy-standard",
-  SHIELD: "enemy-shield",
-  RIFLEMAN: "enemy-rifleman",
-  BASE: "follower-base",
-  BRUTE: "follower-brute",
-};
+/** Texture key per character kind — the *base* layer, which is the texture the
+ * entity sprite itself carries and the one `applyCharacterArt` sizes and seats
+ * everything against.
+ *
+ * Derived from `CHARACTER_LAYERS` rather than written out again, so the base
+ * can't drift from layer 0 of the composition recipe. Anything drawn over it
+ * lives in that manifest — see characterLayers.ts. */
+export const CHARACTER_TEXTURE: Record<EnemyKind | FollowerKind, string> = Object.fromEntries(
+  Object.entries(CHARACTER_LAYERS).map(([kind, layers]) => [kind, layers[0].texture]),
+) as Record<EnemyKind | FollowerKind, string>;
 
 const URLS: Record<string, string> = {
   "enemy-standard": standardUrl,
@@ -26,9 +28,18 @@ const URLS: Record<string, string> = {
 };
 
 /** Call from the scene's preload(). One call covers every enemy and follower
- * kind, so neither entity has to know about the other's art. */
+ * kind, so neither entity has to know about the other's art.
+ *
+ * Loads every texture any layer references, not just the bases — a layer
+ * listed in CHARACTER_LAYERS whose image was never loaded would render as a
+ * green box, which is a confusing way to find out about a typo. */
 export function preloadCharacterArt(scene: Phaser.Scene): void {
-  for (const [key, url] of Object.entries(URLS)) {
+  const needed = new Set(Object.values(CHARACTER_LAYERS).flatMap((ls) => ls.map((l) => l.texture)));
+  for (const key of needed) {
+    const url = URLS[key];
+    if (!url) {
+      throw new Error(`CHARACTER_LAYERS references texture "${key}" with no entry in URLS (characterArt.ts)`);
+    }
     scene.load.image(key, url);
   }
 }

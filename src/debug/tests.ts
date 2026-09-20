@@ -294,6 +294,78 @@ export const TESTS: TestCase[] = [
     ],
   },
   {
+    demo: "artLayers",
+    name: "Runtime layers stay glued to the character they're drawn over",
+    checkpoints: single(20, (scene) => {
+      const { soldiers } = scene.getTestSnapshot();
+      const [facingRight, flipped, tinted] = soldiers;
+      const checks: Check[] = [
+        {
+          label: "All three soldiers carry an overlay layer",
+          pass: soldiers.length === 3 && soldiers.every((s) => s.layers.isLayered),
+          detail: `layered=[${soldiers.map((s) => s.layers.isLayered)}]`,
+        },
+      ];
+
+      const overlayOf = (s: (typeof soldiers)[number]) => s.layers.layerSprites[0];
+
+      // Position: an overlay that doesn't track its body is the whole
+      // feature failing, and at rest it looks fine — so check the numbers.
+      for (const s of soldiers) {
+        const o = overlayOf(s);
+        checks.push({
+          label: `${s.state}: overlay sits exactly on its body`,
+          pass: !!o && o.x === s.x && o.y === s.y,
+          detail: `overlay=(${o?.x},${o?.y}) body=(${s.x},${s.y})`,
+        });
+        checks.push({
+          // Shared origin is what keeps a layer's feet on the same line as
+          // the body's — the artRoster failure mode, one level down.
+          label: `${s.state}: overlay shares the body's origin and scale`,
+          pass: !!o && o.originY === s.originY && o.scaleY === s.scaleY,
+          detail: `originY ${o?.originY} vs ${s.originY}, scaleY ${o?.scaleY} vs ${s.scaleY}`,
+        });
+        checks.push({
+          // Must be above its own body but below the next character, or a
+          // layer would render behind the figure it belongs to.
+          label: `${s.state}: overlay draws just above its own body`,
+          pass: !!o && o.depth > s.depth && o.depth - s.depth < 1e-4,
+          detail: `overlay=${o?.depth} body=${s.depth}`,
+        });
+      }
+
+      checks.push({
+        // Facing is mirrored by flipX; an overlay that ignored it would show
+        // gear on the wrong side the moment a soldier turned.
+        label: "Overlay mirrors the body's facing (one right, one flipped)",
+        pass:
+          overlayOf(facingRight)?.flipX === facingRight.flipX &&
+          overlayOf(flipped)?.flipX === flipped.flipX &&
+          facingRight.flipX !== flipped.flipX,
+        detail: `right=${overlayOf(facingRight)?.flipX}/${facingRight.flipX} flipped=${overlayOf(flipped)?.flipX}/${flipped.flipX}`,
+      });
+
+      checks.push({
+        // The one that would ship broken and look merely "a bit off": state
+        // tints are how a soldier is read, so a green body under untinted
+        // gear misreports paralysis.
+        label: "Paralyze tint reaches the overlay, not just the body",
+        pass: tinted.isTinted && overlayOf(tinted)?.isTinted === true && overlayOf(tinted)?.tintTopLeft === tinted.tintTopLeft,
+        detail: `body=${tinted.tintTopLeft?.toString(16)} overlay=${overlayOf(tinted)?.tintTopLeft?.toString(16)}`,
+      });
+
+      checks.push({
+        // And the contrast case, or the check above would pass on a stack
+        // that simply tinted everything unconditionally.
+        label: "An untinted soldier's overlay is untinted too",
+        pass: !facingRight.isTinted && overlayOf(facingRight)?.isTinted === false,
+        detail: `body=${facingRight.isTinted} overlay=${overlayOf(facingRight)?.isTinted}`,
+      });
+
+      return checks;
+    }),
+  },
+  {
     demo: "artRoster",
     name: "Enemy/follower art: feet on the ground line, hitboxes untouched",
     checkpoints: single(20, (scene) => {
