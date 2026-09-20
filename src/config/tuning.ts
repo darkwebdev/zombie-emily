@@ -476,14 +476,43 @@ export const HORDE_SPREAD = {
   xOffsets: [0, 13, -7, 20, -17, 6, -13],
 };
 
-/** Draw depth for Emily and the soldiers. They stand on the canonical
- * GROUND_LINE, which is now the *back* edge of the horde's band, so sorting
- * them strictly by their feet would bury them behind every follower. Both are
- * figures whose state the player has to be able to read at a glance — Emily
- * because she's the one being aimed, a soldier because its paralyze and aim
- * tints are the whole tell — so they draw in front of the horde instead. The
- * lie is at most HORDE_SPREAD.yBand px deep and nobody can see it. */
+/** Draw depth for every soldier. They stand on the canonical GROUND_LINE,
+ * which is the *back* edge of the horde's band, so sorting them strictly by
+ * their feet would bury them behind every follower. A soldier is a figure
+ * whose state the player has to be able to read at a glance — its paralyze
+ * and aim tints are the whole tell — so it draws in front of the horde
+ * instead. The lie is at most HORDE_SPREAD.yBand px deep and nobody can see
+ * it.
+ *
+ * Two exceptions sit above this, both specified in docs/RENDERING.md section 2
+ * and landing with it — read it before changing any of the three: a follower
+ * that has latched a
+ * flank side and arrived in bite range draws at FLANK_FRONT_DEPTH (bounded to
+ * FLANK.frontSlotsPerSide per side, so a soldier is never fully buried), and
+ * Emily draws at EMILY_DEPTH, above both, since she is never the figure being
+ * surrounded. The name is kept as-is: this is still the depth a character
+ * standing on the canonical ground line draws at, which is now every soldier.
+ *
+ * yBand's ceiling comes from this stack: EMILY_DEPTH is yBand + 3 and must
+ * stay below PROJECTILE_DEPTH, so yBand <= 6 — it is at that ceiling today,
+ * and raising it means raising PROJECTILE_DEPTH in the same change. */
 export const CHARACTER_FRONT_DEPTH = HORDE_SPREAD.yBand + 1;
+
+/** Draw depth for a follower that has latched a flank side and arrived in
+ * bite range of the soldier it is attacking — in front of that soldier, so
+ * the flank is visible at the moment it matters. Bounded to
+ * FLANK.frontSlotsPerSide per side, so enough of the soldier always shows for
+ * its tints to stay readable; everyone past the cap keeps its band depth.
+ * The follower's seed epsilon is carried into this lane too, so no two
+ * followers ever share a depth. See docs/RENDERING.md section 2. */
+export const FLANK_FRONT_DEPTH = CHARACTER_FRONT_DEPTH + 1;
+
+/** Draw depth for Emily. Above the flank lane as well as the horde: she is
+ * the player's avatar and is never the figure being surrounded, so nothing
+ * draws over her. She feeds at contact range of soldiers her horde is biting,
+ * so without this a front-slot follower parked a standoff off that soldier's
+ * centre would routinely cover her — the reported bug, aimed at the player. */
+export const EMILY_DEPTH = FLANK_FRONT_DEPTH + 1;
 
 /** Draw depth for thrown limbs and bullets. Characters sit in the depth band
  * HORDE_SPREAD puts them in, so a projectile left at the default 0 would be
@@ -522,6 +551,49 @@ export const FLANK = {
    * horde-spread scatter. Length 5 is coprime with HORDE_SPREAD's tables
    * (10 and 7) so the three don't cycle together. */
   sideJitter: [0, 2, -2, 1, -1],
+  /** How many followers per side may draw in front of the soldier they are
+   * biting (FLANK_FRONT_DEPTH). The cap is what keeps the soldier readable:
+   * at 1 per side, a surrounded soldier has at most two figures over it — one
+   * from each direction — and its paralyze/aim tint still shows between and
+   * above them. Everyone past the cap keeps its band depth and is occluded,
+   * which is the intended reading of "only last ones can be hidden".
+   * Per-side, not global, so a two-sided surround lifts one from each rather
+   * than two from whichever side arrived first. */
+  frontSlotsPerSide: 1,
+};
+
+/** Overrides that exist only for `?debug=1` demo scenarios — never applied to
+ * level spawns, so none of this touches real balance. */
+export const DEMO = {
+  /** HP handed to the soldier being ganged up on in the surround demos.
+   *
+   * Real enemy HP makes the mechanic almost impossible to watch: a surround
+   * takes ~550ms to close, and most of the roster dies inside that (a 4hp
+   * Rifleman falls to a single volley at ~510ms), so the demo would be over
+   * at the moment it became worth looking at. At this value two base
+   * followers — 2 x FOLLOWER.biteDamage every FOLLOWER.biteCooldown, ~6.7
+   * dmg/s — take about 3.5s to finish it, which leaves several seconds of
+   * the horde actually standing on both sides.
+   *
+   * Deliberately NOT applied to the flankGunner, flankBrutes or
+   * flankShieldActive demos: those exist to record the opposite finding —
+   * that the fight is shorter than the walk, or that a Shield one-shots base
+   * followers — which is live evidence on issues #35 and #36 and would be
+   * erased by padding the target's HP. Whether *real* enemy HP should rise
+   * is #35's open question, not this constant's. */
+  surroundTargetHp: 32,
+
+  /** HP handed to the followers in the one surround demo whose target is
+   * still ACTIVE (hordeFlank). Padding the soldier's HP without padding
+   * theirs inverts that fight: a STANDARD deals contactDamage 1 against
+   * FOLLOWER.hp 2, so at real HP the pair are dead long before a 32hp
+   * soldier is, and the demo ends with the horde wiped instead of showing a
+   * surround.
+   *
+   * Deliberately NOT applied to the paralyzed demos. Those assert that the
+   * pair survived *because the target can't hit back* — a claim that would
+   * pass for the wrong reason if the followers were padded too. */
+  surroundFollowerHp: 12,
 };
 
 export const TRAIL = {

@@ -11,7 +11,7 @@ function distance(a: { x: number; y: number }, b: { x: number; y: number }): num
 /** A follower's reach applies symmetrically — a Brute can be bitten from
  * the same distance it can bite from, so it doesn't get an invisible,
  * confusing one-sided advantage. */
-function touchingFollower(soldier: Soldier, follower: Follower): boolean {
+export function touchingFollower(soldier: Soldier, follower: Follower): boolean {
   return distance(soldier, follower) <= Math.max(COMBAT.contactRange, follower.stats.reach);
 }
 

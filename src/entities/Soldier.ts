@@ -60,6 +60,10 @@ export class Soldier extends Phaser.Physics.Arcade.Sprite {
     // Feet on the canonical ground line, but drawn in front of the horde
     // rather than sorted into it — a soldier buried under a swarm hides the
     // paralyze/aim tints the player reads it by. See CHARACTER_FRONT_DEPTH.
+    // Not absolute: a follower that has flanked this soldier and arrived in
+    // bite range draws in front of it (FLANK_FRONT_DEPTH), bounded to
+    // FLANK.frontSlotsPerSide per side so enough of it always shows — see
+    // docs/RENDERING.md section 2.
     this.setDepth(CHARACTER_FRONT_DEPTH);
 
     this.kind = kind;

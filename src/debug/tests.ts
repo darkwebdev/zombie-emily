@@ -64,6 +64,11 @@ interface FlankObs {
   /** When that first happened — so a test can say how long the surround was
    * actually on screen for, rather than only that it happened at all. */
   surroundedInRangeMs: number | null;
+  /** ...and the last moment it still held. `until - surroundedInRangeMs` is
+   * the surround's real on-screen duration, which is what a demo is judged
+   * on — deliberately not "time from surround to the target's death", since
+   * that reads as zero whenever the target outlives the checkpoint. */
+  surroundedInRangeUntilMs: number | null;
   /** ...and every one of them was facing inward at the target. */
   everFacedInward: boolean;
   firstBiteMs: number | null;
@@ -92,6 +97,7 @@ function watchFlank(scene: GameScene, target: Soldier): FlankObs {
     everSurrounded: false,
     everSurroundedInRange: false,
     surroundedInRangeMs: null,
+    surroundedInRangeUntilMs: null,
     everFacedInward: false,
     firstBiteMs: null,
     killMs: null,
@@ -139,6 +145,7 @@ function watchFlank(scene: GameScene, target: Soldier): FlankObs {
       if (inRange) {
         obs.everSurroundedInRange = true;
         if (obs.surroundedInRangeMs === null) obs.surroundedInRangeMs = ms;
+        obs.surroundedInRangeUntilMs = ms;
       }
       if (on.every((f) => f.flipX === f.x > target.x)) obs.everFacedInward = true;
     }
@@ -1277,7 +1284,7 @@ export const TESTS: TestCase[] = [
   },
   {
     demo: "flankShield",
-    name: "A paralyzed Shield Trooper is surrounded, in range, for half a second",
+    name: "A paralyzed Shield Trooper is surrounded, in range, and held there",
     run: (scene) => {
       watchFlank(scene, scene.getTestSnapshot().soldiers[0]);
     },
@@ -1287,9 +1294,13 @@ export const TESTS: TestCase[] = [
         afterMs: 1300,
         assert: (scene) => {
           const obs = readFlank(scene);
-          const held = obs.killMs !== null && obs.surroundedInRangeMs !== null
-            ? obs.killMs - obs.surroundedInRangeMs
-            : 0;
+          // Comfortably longer than the ~550ms the surround takes to close,
+          // so this fails if the demo ever goes back to ending on arrival.
+          const MIN_HELD_MS = 500;
+          const held =
+            obs.surroundedInRangeMs !== null && obs.surroundedInRangeUntilMs !== null
+              ? obs.surroundedInRangeUntilMs - obs.surroundedInRangeMs
+              : 0;
           return [
             {
               label: "Both sides were held with both followers inside their own bite reach",
@@ -1304,13 +1315,14 @@ export const TESTS: TestCase[] = [
               detail: `faced=${obs.everFacedInward}`,
             },
             {
-              // The whole reason this demo paralyzes first: a 9hp target
-              // under the defenseless multiplier still needs three base
-              // bites, so the surround is on screen for a real length of
-              // time instead of one frame. This is the longest window the
-              // current roster can produce.
-              label: "And held it for >=300ms rather than a single frame",
-              pass: held >= 300,
+              // Why this demo both paralyzes and uses DEMO.surroundTargetHp:
+              // at real HP the surround is on screen for a few frames, which
+              // is long enough to assert but far too short to *watch*. The
+              // duration is measured directly rather than as "kill minus
+              // surround", so it stays meaningful now the target routinely
+              // outlives the checkpoint.
+              label: `And held it for >=${MIN_HELD_MS}ms rather than a single frame`,
+              pass: held >= MIN_HELD_MS,
               detail: `heldMs=${held} killMs=${obs.killMs}`,
             },
             {
@@ -1574,6 +1586,232 @@ export const TESTS: TestCase[] = [
               label: "The fight got far enough for both to be engaging it at once",
               pass: obs.attackersSeen === FLANK.minEngagers,
               detail: `attackersSeen=${obs.attackersSeen}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  // The three cases below are the front-slot depth rule (docs/RENDERING.md
+  // section 2): a follower that has flanked draws in front of the soldier it
+  // is biting, but only FLANK.frontSlotsPerSide of them per side. Every claim
+  // compares a follower's depth against its *actual target's* depth rather
+  // than against the constant, so they still mean something if the depth
+  // table is renumbered.
+  {
+    demo: "flankMixed",
+    name: "A flanker in bite range draws in front of the soldier it is biting",
+    // Sampled every frame: the lift only applies while a follower is both
+    // latched to a side and inside its own bite reach, which is a window
+    // that opens partway through the approach and closes when the target
+    // dies. A fixed-time assertion would be a race against both edges.
+    run: (scene) => {
+      const seen = { base: false, brute: false, everInRangeBehind: false, samples: 0, firstBehind: "" };
+      (scene as unknown as { __frontObs?: typeof seen }).__frontObs = seen;
+      // Arcade integrates velocity into position between scene.update() and
+      // POST_UPDATE, so this sampler sees a follower cross into bite range
+      // one step before GameScene's own depth pass did. The lift therefore
+      // lands on the *next* frame, which is invisible at 60fps but real —
+      // so a follower only counts as wrongly-behind if it was already in
+      // range at the previous sample too. Without this the case fails on
+      // exactly one frame per fight, and only under the suite's batch
+      // stepping (a live run never shows it).
+      const wasInRange = new Set<Follower>();
+      scene.events.on(Phaser.Scenes.Events.POST_UPDATE, () => {
+        const snap = scene.getTestSnapshot();
+        const nowInRange = new Set<Follower>();
+        snap.followers.forEach((f) => {
+          const t = f.flankTarget;
+          if (!t || !t.active || t.hp <= 0 || f.flankSide === 0) return;
+          const inRange =
+            Phaser.Math.Distance.Between(f.x, f.y, t.x, t.y) <=
+            Math.max(COMBAT.contactRange, f.stats.reach);
+          if (!inRange) return;
+          nowInRange.add(f);
+          seen.samples++;
+          if (f.depth > t.depth) {
+            if (f.kind === "BRUTE") seen.brute = true;
+            else seen.base = true;
+          } else if (wasInRange.has(f)) {
+            seen.everInRangeBehind = true;
+            if (!seen.firstBehind) {
+              seen.firstBehind = `${f.kind} side=${f.flankSide} front=${f.frontSlot} fd=${f.depth.toFixed(3)} td=${t.depth} dist=${Phaser.Math.Distance.Between(f.x, f.y, t.x, t.y).toFixed(1)} targetHp=${t.hp}`;
+            }
+          }
+        });
+        wasInRange.clear();
+        nowInRange.forEach((f) => wasInRange.add(f));
+      });
+    },
+    checkpoints: [
+      {
+        afterMs: 1500,
+        assert: (scene) => {
+          const seen = (scene as unknown as { __frontObs: { base: boolean; brute: boolean; everInRangeBehind: boolean; samples: number; firstBehind: string } }).__frontObs;
+          return [
+            {
+              // Guards the two claims below from passing vacuously if the
+              // fight ever stops producing an in-range flanker at all.
+              label: "The fight actually produced in-range flankers to judge",
+              pass: seen.samples > 0,
+              detail: `samples=${seen.samples}`,
+            },
+            {
+              label: "The base follower drew in front of its target while biting it",
+              pass: seen.base,
+              detail: `base=${seen.base}`,
+            },
+            {
+              // Both kinds, because a Brute's longer reach lets it bite from
+              // further out — if the lift were keyed off a single hardcoded
+              // distance rather than each kind's own reach, this is the one
+              // that would fail.
+              label: "So did the Brute, on its own (longer) reach",
+              pass: seen.brute,
+              detail: `brute=${seen.brute}`,
+            },
+            {
+              label: "No latched flanker was ever left behind its target while in range",
+              pass: !seen.everInRangeBehind,
+              detail: seen.firstBehind || "none",
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "hordeFlank",
+    name: "A lone engager is not lifted — it would cover its target outright",
+    // The right-hand fight in this demo is one follower on one soldier,
+    // below FLANK.minEngagers, so it never takes a side and walks at the
+    // soldier's exact centre. Lifting that one would hide the soldier
+    // completely rather than flank it, which is the case
+    // CHARACTER_FRONT_DEPTH exists to prevent.
+    run: (scene) => {
+      const seen = { inContact: 0, liftedWhileCentred: 0 };
+      (scene as unknown as { __loneObs?: typeof seen }).__loneObs = seen;
+      scene.events.on(Phaser.Scenes.Events.POST_UPDATE, () => {
+        const snap = scene.getTestSnapshot();
+        snap.followers.forEach((f) => {
+          const t = f.flankTarget;
+          if (!t || !t.active || t.hp <= 0 || f.flankSide !== 0) return;
+          const inRange =
+            Phaser.Math.Distance.Between(f.x, f.y, t.x, t.y) <=
+            Math.max(COMBAT.contactRange, f.stats.reach);
+          if (!inRange) return;
+          seen.inContact++;
+          if (f.depth > t.depth) seen.liftedWhileCentred++;
+        });
+      });
+    },
+    checkpoints: [
+      {
+        afterMs: 1500,
+        assert: (scene) => {
+          const seen = (scene as unknown as { __loneObs: { inContact: number; liftedWhileCentred: number } }).__loneObs;
+          return [
+            {
+              label: "A side-0 follower did reach contact with its target",
+              pass: seen.inContact > 0,
+              detail: `frames=${seen.inContact}`,
+            },
+            {
+              label: "And was never lifted in front of it",
+              pass: seen.liftedWhileCentred === 0,
+              detail: `liftedFrames=${seen.liftedWhileCentred}`,
+            },
+          ];
+        },
+      },
+    ],
+  },
+  {
+    demo: "flankOverflow",
+    name: "Front slots are capped per side — the overflow stays behind the target",
+    run: (scene) => {
+      const seen = {
+        crowdedSideSeen: false,
+        capViolated: false,
+        occludedSeen: false,
+        loneSideLifted: false,
+        emilyBuried: false,
+        worst: "",
+      };
+      (scene as unknown as { __capObs?: typeof seen }).__capObs = seen;
+      scene.events.on(Phaser.Scenes.Events.POST_UPDATE, () => {
+        const snap = scene.getTestSnapshot();
+        const target = snap.soldiers.find((s) => s.active && s.hp > 0);
+        if (!target) return;
+        const inRange = snap.followers.filter(
+          (f) =>
+            f.flankTarget === target &&
+            f.flankSide !== 0 &&
+            Phaser.Math.Distance.Between(f.x, f.y, target.x, target.y) <=
+              Math.max(COMBAT.contactRange, f.stats.reach),
+        );
+        if (!inRange.length) return;
+        ([-1, 1] as const).forEach((side) => {
+          const onSide = inRange.filter((f) => f.flankSide === side);
+          if (!onSide.length) return;
+          const front = onSide.filter((f) => f.depth > target.depth);
+          if (onSide.length > FLANK.frontSlotsPerSide) {
+            seen.crowdedSideSeen = true;
+            if (front.length !== FLANK.frontSlotsPerSide) {
+              seen.capViolated = true;
+              seen.worst = `side=${side} onSide=${onSide.length} front=${front.length}`;
+            }
+            if (onSide.length - front.length > 0) seen.occludedSeen = true;
+          } else if (front.length === onSide.length) {
+            seen.loneSideLifted = true;
+          }
+        });
+        if (inRange.some((f) => f.depth >= snap.emily.depth)) seen.emilyBuried = true;
+      });
+    },
+    checkpoints: [
+      {
+        afterMs: 1500,
+        assert: (scene) => {
+          const seen = (scene as unknown as {
+            __capObs: {
+              crowdedSideSeen: boolean;
+              capViolated: boolean;
+              occludedSeen: boolean;
+              loneSideLifted: boolean;
+              emilyBuried: boolean;
+              worst: string;
+            };
+          }).__capObs;
+          return [
+            {
+              // Without this the cap assertion below would pass trivially on
+              // a scenario that never actually crowded a side.
+              label: "A side really did hold more attackers than it has front slots",
+              pass: seen.crowdedSideSeen,
+              detail: `crowded=${seen.crowdedSideSeen}`,
+            },
+            {
+              label: `Exactly FLANK.frontSlotsPerSide (${FLANK.frontSlotsPerSide}) drew in front on that side`,
+              pass: seen.crowdedSideSeen && !seen.capViolated,
+              detail: seen.worst || "no violation",
+            },
+            {
+              label: "The overflow stayed behind the target rather than being lifted too",
+              pass: seen.occludedSeen,
+              detail: `occluded=${seen.occludedSeen}`,
+            },
+            {
+              // The cap is per side, not a global budget: a two-sided
+              // surround must lift one from each, not one in total.
+              label: "The uncrowded side still got its attacker lifted",
+              pass: seen.loneSideLifted,
+              detail: `loneSideLifted=${seen.loneSideLifted}`,
+            },
+            {
+              label: "Emily still drew above every lifted follower",
+              pass: !seen.emilyBuried,
+              detail: `buried=${seen.emilyBuried}`,
             },
           ];
         },

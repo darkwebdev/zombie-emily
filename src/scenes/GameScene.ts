@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { WORLD, EMILY, EMILY_SPRITE, LIMB, COMBAT, AGGRO, FLANK, FUSION, TRAIL_DEGENERATION_THRESHOLD } from "../config/tuning";
+import { WORLD, EMILY, EMILY_SPRITE, LIMB, COMBAT, AGGRO, FLANK, DEMO, FUSION, FLANK_FRONT_DEPTH, TRAIL_DEGENERATION_THRESHOLD } from "../config/tuning";
 import type { DemoName } from "../debug/demos";
 import type { EnemyKind, FollowerKind } from "../config/tuning";
 import { Emily } from "../entities/Emily";
@@ -8,7 +8,7 @@ import { Soldier } from "../entities/Soldier";
 import { Follower } from "../entities/Follower";
 import { Limb } from "../entities/Limb";
 import { BreadcrumbTrail } from "../systems/BreadcrumbTrail";
-import { CombatSystem } from "../systems/CombatSystem";
+import { CombatSystem, touchingFollower } from "../systems/CombatSystem";
 import { AggroSystem } from "../systems/AggroSystem";
 import { GunfireSystem } from "../systems/GunfireSystem";
 import { ParallaxBackground } from "../systems/ParallaxBackground";
@@ -249,6 +249,8 @@ export class GameScene extends Phaser.Scene {
           f.setVelocityX(0);
         }
       });
+
+    this.updateFlankDepths(engaging);
 
     this.updateSoldierTargeting();
     this.soldiers.forEach((s) => s.update(dt));
@@ -526,6 +528,67 @@ export class GameScene extends Phaser.Scene {
     if (follower.flankSide === 0) return target.x;
     const standoff = follower.stats.flankStandoff + follower.flankJitter;
     return Phaser.Math.Clamp(target.x + follower.flankSide * standoff, 0, WORLD.levelWidth);
+  }
+
+  /** Decide which followers draw in front of the soldier they're biting.
+   *
+   * A flanker that has crossed to a soldier's far side is the thing the
+   * player is meant to see, but every soldier draws at CHARACTER_FRONT_DEPTH,
+   * so before this the flanker was hidden behind the figure it had just
+   * surrounded. Lifting *every* engager would only invert the problem and
+   * bury the soldier's paralyze/aim tints, so the lift is bounded to
+   * FLANK.frontSlotsPerSide per side: the first arrivals stand in front, and
+   * a pile-on past the cap is occluded. See docs/RENDERING.md section 2.
+   *
+   * Runs after the movement loop, because a side is latched inside
+   * flankSlotX while that loop walks. Writes a depth for every follower every
+   * frame, so a slot can never leak — there's no separate clear path to miss.
+   */
+  private updateFlankDepths(engaging: Map<Follower, Soldier>): void {
+    const candidates = new Map<Soldier, Follower[]>();
+    const incumbent = new Set<Follower>();
+    this.followers.forEach((f) => {
+      if (f.frontSlot) incumbent.add(f);
+      f.frontSlot = false;
+      const target = engaging.get(f);
+      // Side 0 is a lone engager walking at the soldier's exact centre.
+      // Lifting it would cover the soldier outright rather than flank it,
+      // which is the case CHARACTER_FRONT_DEPTH exists to prevent. Strictly
+      // redundant with the per-side loop below (which only ever matches -1
+      // and +1), but kept because it states the rule at the point the rule
+      // applies — the loop's shape is an implementation detail that a
+      // refactor could change without anyone noticing this went with it.
+      if (!target || f.flankSide === 0 || !touchingFollower(target, f)) return;
+      const list = candidates.get(target);
+      if (list) list.push(f);
+      else candidates.set(target, [f]);
+    });
+
+    candidates.forEach((list, target) => {
+      for (const side of [-1, 1] as const) {
+        list
+          .filter((f) => f.flankSide === side)
+          // Incumbents first so a holder is never displaced mid-fight (the
+          // flicker that would cause is worse than the ordering being ideal),
+          // then nearest to the soldier. Exact ties fall back to the array's
+          // own order — the scene's spawn order, deliberately not rank, which
+          // is the same tie-break flankSlotX documents.
+          .sort(
+            (a, b) =>
+              Number(incumbent.has(b)) - Number(incumbent.has(a)) ||
+              Math.abs(a.x - target.x) - Math.abs(b.x - target.x),
+          )
+          .slice(0, FLANK.frontSlotsPerSide)
+          .forEach((f) => {
+            f.frontSlot = true;
+          });
+      }
+    });
+
+    this.followers.forEach((f) => {
+      const depth = f.frontSlot ? FLANK_FRONT_DEPTH + f.seedEpsilon : f.bandDepth;
+      if (f.depth !== depth) f.setDepth(depth);
+    });
   }
 
   private nearestZombieX(soldier: Soldier, radius: number): { x: number; dist: number } | null {
@@ -867,8 +930,11 @@ export class GameScene extends Phaser.Scene {
 
   /** Spawns a soldier at a fixed offset from Emily's current position —
    * everything a demo (other than "reset") ever needs. */
-  private spawnSoldierNear(offsetX: number, kind: EnemyKind = "STANDARD", facing: 1 | -1 = -1): Soldier {
+  private spawnSoldierNear(offsetX: number, kind: EnemyKind = "STANDARD", facing: 1 | -1 = -1, hp?: number): Soldier {
     const s = new Soldier(this, this.emily.x + offsetX, WORLD.groundY, kind, facing);
+    // Demo-only HP override (DEMO.surroundTargetHp). Nothing on the level
+    // path passes this, so real balance is untouched.
+    if (hp !== undefined) s.hp = hp;
     this.soldiers.push(s);
     return s;
   }
@@ -876,9 +942,12 @@ export class GameScene extends Phaser.Scene {
   /** Spawns a follower directly, skipping the conversion pipeline entirely
    * — a demo that needs a horde member doesn't need a soldier to convert
    * it from. */
-  private spawnFollowerNear(offsetX: number, kind: FollowerKind = "BASE"): Follower {
+  private spawnFollowerNear(offsetX: number, kind: FollowerKind = "BASE", hp?: number): Follower {
     const rank = this.followers.length;
     const f = new Follower(this, this.emily.x + offsetX, WORLD.groundY, rank, kind, this.nextFollowerSeed());
+    // Demo-only HP override (DEMO.surroundFollowerHp), same rationale as the
+    // soldier one above: never passed on the level path.
+    if (hp !== undefined) f.hp = hp;
     this.followers.push(f);
     return f;
   }
@@ -1013,15 +1082,15 @@ export class GameScene extends Phaser.Scene {
         // followers deal 8 damage in their first volley and a 6hp STANDARD
         // would be dead before it could be seen surrounded at all.
         [-10, -25].forEach((dx) => {
-          this.spawnFollowerNear(dx).hasJoined = true;
+          this.spawnFollowerNear(dx, "BASE", DEMO.surroundFollowerHp).hasJoined = true;
         });
-        this.spawnSoldierNear(50);
+        this.spawnSoldierNear(50, "STANDARD", -1, DEMO.surroundTargetHp);
         // Right: one follower on its own soldier, below the threshold, so it
         // still walks straight at the centre exactly as before. Parked far
         // enough that neither fight is inside the other's engageRadius (140)
         // — 150px apart, so nothing crosses over.
-        this.spawnFollowerNear(200).hasJoined = true;
-        this.spawnSoldierNear(240);
+        this.spawnFollowerNear(200, "BASE", DEMO.surroundFollowerHp).hasJoined = true;
+        this.spawnSoldierNear(240, "STANDARD", -1, DEMO.surroundTargetHp);
         break;
       }
       // The four demos below are the same gang-up against the rest of the
@@ -1041,13 +1110,13 @@ export class GameScene extends Phaser.Scene {
         // Paralyzed on purpose: a SHIELD's contactDamage (2) is a base
         // follower's entire hp, so this is the only way a pair of them
         // survives long enough to be seen surrounding anything — and it is
-        // also how the enemy is meant to be taken. 9hp under the
-        // defenseless multiplier still takes three base bites, which is the
-        // longest surround window in the game.
+        // also how the enemy is meant to be taken. Given DEMO.surroundTargetHp
+        // so the pair hold both sides for seconds rather than the ~300ms real
+        // HP allows: this is the demo you watch to see a surround at all.
         [-10, -25].forEach((dx) => {
           this.spawnFollowerNear(dx).hasJoined = true;
         });
-        this.spawnSoldierNear(50, "SHIELD").paralyze();
+        this.spawnSoldierNear(50, "SHIELD", -1, DEMO.surroundTargetHp).paralyze();
         break;
       }
       case "flankShieldActive": {
@@ -1069,7 +1138,7 @@ export class GameScene extends Phaser.Scene {
         // when the far side is otherwise uncovered.
         this.spawnFollowerNear(-10).hasJoined = true;
         this.spawnFollowerNear(110).hasJoined = true;
-        this.spawnSoldierNear(50, "SHIELD").paralyze();
+        this.spawnSoldierNear(50, "SHIELD", -1, DEMO.surroundTargetHp).paralyze();
         break;
       }
       case "flankBrutes": {
@@ -1088,7 +1157,25 @@ export class GameScene extends Phaser.Scene {
         // one-shot before the two standoffs can be compared.
         this.spawnFollowerNear(-10).hasJoined = true;
         this.spawnFollowerNear(-25, "BRUTE").hasJoined = true;
-        this.spawnSoldierNear(50, "SHIELD").paralyze();
+        this.spawnSoldierNear(50, "SHIELD", -1, DEMO.surroundTargetHp).paralyze();
+        break;
+      }
+      case "flankOverflow": {
+        // Three base followers already inside bite range of one target, split
+        // 2:1, so one side has more attackers than it has front slots. That
+        // is the only way to see the cap do anything: every other surround
+        // demo has at most one follower per side, so all of them are lifted
+        // and nothing is ever occluded.
+        //
+        // Pre-placed rather than walked in, because the whole point is the
+        // moment they are all in contact — three base followers deal 6 a
+        // volley, and a walked-in version would spend most of its life with
+        // nobody in range. Offsets are inside FOLLOWER.reach (16) of the
+        // soldier even at the worst horde-band vertical offset.
+        [8, 13, -10].forEach((dx) => {
+          this.spawnFollowerNear(50 + dx).hasJoined = true;
+        });
+        this.spawnSoldierNear(50, "SHIELD", -1, DEMO.surroundTargetHp).paralyze();
         break;
       }
       case "hordeSpread": {

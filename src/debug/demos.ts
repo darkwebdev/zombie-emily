@@ -132,6 +132,12 @@ export const DEMOS = [
       "One base follower and one Brute sharing a (paralyzed) Shield Trooper, with the base follower nearest. Two things to look at: the light unit is the one sent across — the rule picks by distance, not by kind or rank — and the two park at different standoffs, 8px for the base follower and 10px for the Brute, each budgeted against its own bite reach so neither loses damage by standing off.",
   },
   {
+    name: "flankOverflow",
+    label: "Surround: Overflow",
+    description:
+      "Three base followers already in biting range of one paralyzed Shield Trooper, unevenly split so one side holds two of them. This is the case the front-slot cap exists for: a follower that has flanked draws in front of the soldier it's biting, but only FLANK.frontSlotsPerSide of them per side — the rest keep their band depth and stay behind it. Without the cap a pile-on would bury the soldier completely and hide the paralyze tint that says it's safe to eat; with it, the first arrival on each side is visible and the overflow is the part that's occluded.",
+  },
+  {
     name: "death",
     label: "Death",
     description: "Drops Emily to 1 HP next to an active soldier, so its next hit triggers the death fade and restart.",
@@ -238,6 +244,7 @@ export const DEMO_GROUPS = [
       "flankBothSides",
       "flankBrutes",
       "flankMixed",
+      "flankOverflow",
     ],
   },
   {

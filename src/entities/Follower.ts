@@ -41,6 +41,23 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
    * vertically when one ahead of it dies or fuses. */
   readonly depthOffset: number;
 
+  /** This follower's resting draw depth: its band offset plus a per-seed
+   * epsilon that breaks ties deterministically between two followers sharing
+   * an offset. Constant for life — the front-slot lift overrides the depth
+   * that is drawn, never this. */
+  readonly bandDepth: number;
+
+  /** The tie-break epsilon on its own, so the lifted lane can carry the same
+   * one and stay collision-free (see FLANK_FRONT_DEPTH). */
+  readonly seedEpsilon: number;
+
+  /** True while this follower holds one of its side's front slots and so
+   * draws in front of the soldier it is biting. Owned by
+   * GameScene.updateFlankDepths, which rewrites it for every follower every
+   * frame; cleared with the side itself in releaseFlankIfNot so a follower
+   * that loses its target can't stay lifted. */
+  frontSlot = false;
+
   /** A constant nudge on this follower's *trail* target only, so a stopped
    * line doesn't collapse onto one x. Deliberately not applied while rushing
    * or engaging — see GameScene's follower loop. */
@@ -74,11 +91,19 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
     this.xJitter = xOffsets[wrap(seed, xOffsets.length)];
     this.flankJitter = FLANK.sideJitter[wrap(seed, FLANK.sideJitter.length)];
     // Feet line is the sort key, so a follower standing further down the
-    // street draws in front of one standing further back. Emily and the
-    // soldiers are exempt and always draw in front (CHARACTER_FRONT_DEPTH).
+    // street draws in front of one standing further back. Soldiers (and
+    // Emily, higher still) are exempt and draw in front of the whole band —
+    // except that a follower which has latched a flank side and arrived in
+    // bite range is lifted in front of the soldier it is biting, bounded per
+    // side (FLANK_FRONT_DEPTH, docs/RENDERING.md section 2). That lift is a
+    // per-frame override applied by GameScene; this value is the follower's
+    // resting band depth and never changes for its life.
     // The seed breaks ties between two followers sharing an offset,
-    // deterministically.
+    // deterministically, and is carried into the lifted depth too so the
+    // "no two followers share a depth" invariant holds in both lanes.
     this.setDepth(depthOffset + seed * 1e-4);
+    this.seedEpsilon = seed * 1e-4;
+    this.bandDepth = depthOffset + this.seedEpsilon;
     this.rank = rank;
     this.kind = kind;
     this.stats = stats;
@@ -122,6 +147,7 @@ export class Follower extends Phaser.Physics.Arcade.Sprite {
     if (this.flankTarget === target) return;
     this.flankTarget = target;
     this.flankSide = 0;
+    this.frontSlot = false;
   }
 
   /** Point at something regardless of which way this follower is travelling.   * followTarget flips by direction of travel, which is wrong the moment a
