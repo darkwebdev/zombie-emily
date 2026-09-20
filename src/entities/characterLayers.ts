@@ -18,10 +18,35 @@ import { CHARACTER_ART, EnemyKind, FollowerKind } from "../config/tuning";
  * that should sit two pixels higher), not for tight-cropped images. They are
  * in source-texture pixels, authored as if the figure faces right; `dx` is
  * mirrored automatically when the character flips. */
+export type AnchorName = "head" | "chest" | "hips" | "hand" | "back";
+
+/** Where a piece of gear hangs off the body, as a fraction of the base
+ * texture. y is measured from the figure's feet (1 = feet, 0 = top of head),
+ * because that is the one line every character is guaranteed to share — the
+ * bases are emitted feet-flush and applyCharacterArt seats them on the ground
+ * line, so anchoring from the bottom stays stable even when two kinds are
+ * different heights. */
+export const ANCHORS: Record<AnchorName, { x: number; y: number }> = {
+  head: { x: 0.5, y: 0.90 },
+  chest: { x: 0.5, y: 0.68 },
+  hips: { x: 0.5, y: 0.48 },
+  hand: { x: 0.62, y: 0.58 },
+  back: { x: 0.5, y: 0.70 },
+};
+
 export interface CharacterLayer {
   texture: string;
+  /** Which anchor this hangs off. Omit for a layer already drawn in place on
+   * a full-figure canvas (the bases, and any pre-aligned art). */
+  anchor?: AnchorName;
+  /** Nudge from the anchor, in base-texture pixels, authored facing right —
+   * dx is mirrored automatically when the character flips. */
   dx?: number;
   dy?: number;
+  /** Multiplies the layer's own size. Source art is rarely drawn at the size
+   * it occupies on the body, so this is the knob that makes a trouser image
+   * actually span waist to boots. */
+  scale?: number;
 }
 
 /** The composition recipe per kind.
@@ -31,41 +56,41 @@ export interface CharacterLayer {
  * the game renders exactly as it did before. Adding modular art means adding
  * entries here; nothing else has to change. See issue #37. */
 export const CHARACTER_LAYERS: Record<EnemyKind | FollowerKind, CharacterLayer[]> = {
-  // Layer 0 is the body; gear stacks over it bottom-up, so legs draw under
-  // the vest and the weapon draws over everything it is held in front of.
+  // Layer 0 is the body, drawn full-figure and feet-flush, so it carries no
+  // anchor. Everything above it is a loose item parked on an anchor — the
+  // numbers below were dialled in with the gear-fitting panel (?debug=1) and
+  // can be re-dialled there any time without re-cutting art.
   STANDARD: [
     { texture: "human-base" },
-    { texture: "legs-pants" },
-    { texture: "torso-vest" },
-    { texture: "head-helmet" },
-    { texture: "rifle-assault" },
+    { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
+    { texture: "torso-vest", anchor: "chest", scale: 1.2 },
+    { texture: "head-helmet", anchor: "head", dy: -2, scale: 1.05 },
+    { texture: "rifle-assault", anchor: "hand", scale: 0.9 },
   ],
-  // Same soldier, different head and weapon — which is the entire point of
-  // the modular set: one body, a loadout per kind.
   RIFLEMAN: [
     { texture: "human-base" },
-    { texture: "legs-pants" },
-    { texture: "torso-vest" },
-    { texture: "head-hood" },
-    { texture: "rifle-sniper" },
+    { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
+    { texture: "torso-vest", anchor: "chest", scale: 1.2 },
+    { texture: "head-hood", anchor: "head", dy: -2, scale: 1.05 },
+    { texture: "rifle-sniper", anchor: "hand", scale: 0.9 },
   ],
   SHIELD: [
     { texture: "human-base" },
-    { texture: "legs-pants" },
-    { texture: "torso-vest" },
-    { texture: "head-helmet" },
-    { texture: "shield-riot" },
+    { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
+    { texture: "torso-vest", anchor: "chest", scale: 1.2 },
+    { texture: "head-helmet", anchor: "head", dy: -2, scale: 1.05 },
+    { texture: "shield-riot", anchor: "chest", dx: -9, scale: 1.2 },
   ],
-  // The infected wear the same gear silhouettes, torn — which is what makes
-  // a conversion readable as "that used to be a soldier". No weapon: both
-  // boards mark the infected weapon column (NONE).
+  // Same gear silhouettes, torn, over a zombie body — which is what makes a
+  // conversion read as "that used to be a soldier". No weapon: both boards
+  // mark the infected weapon column (NONE).
   BASE: [
     { texture: "infected-base" },
-    { texture: "infected-legs" },
-    { texture: "infected-torso-torn" },
+    { texture: "infected-legs", anchor: "hips", dy: 4, scale: 1.45 },
+    { texture: "infected-torso-torn", anchor: "chest", scale: 1.2 },
   ],
-  // Still a single finished figure: the boards carry no brute components,
-  // and its whole job is a silhouette that shares nothing with a soldier.
+  // Still one finished figure: the boards carry no brute components, and its
+  // whole job is a silhouette that shares nothing with a soldier.
   BRUTE: [{ texture: "follower-brute" }],
 };
 
@@ -119,6 +144,7 @@ export class CharacterLayerStack {
   private readonly sprites: Phaser.GameObjects.Sprite[] = [];
   private readonly specs: CharacterLayer[];
   private readonly scene: Phaser.Scene;
+  private readonly kind: EnemyKind | FollowerKind;
 
   constructor(
     scene: Phaser.Scene,
@@ -129,6 +155,7 @@ export class CharacterLayerStack {
     // need new sprites. With today's single-layer art this loop body never
     // runs, so a character costs exactly what it always did.
     this.scene = scene;
+    this.kind = kind;
     this.specs = CHARACTER_LAYERS[kind].slice(1);
     for (const spec of this.specs) {
       const sprite = scene.add.sprite(parent.x, parent.y, spec.texture);
@@ -187,15 +214,39 @@ export class CharacterLayerStack {
       const sprite = this.sprites[i];
       const spec = this.specs[i];
 
-      // Authored facing right, so a flipped character mirrors the x offset —
-      // otherwise a helmet nudged toward the face would jump to the back of
-      // the head the moment the soldier turned.
-      const dx = (spec.dx ?? 0) * renderScale * (p.flipX ? -1 : 1);
-      const dy = (spec.dy ?? 0) * renderScale;
+      // Authored facing right, so a flipped character mirrors every x offset —
+      // otherwise a rifle held out to the right jumps behind the soldier the
+      // moment he turns.
+      const mirror = p.flipX ? -1 : 1;
+      const layerScale = spec.scale ?? 1;
 
-      sprite.setPosition(p.x + dx, p.y + dy);
-      sprite.setOrigin(p.originX, p.originY);
-      sprite.setScale(p.scaleX, p.scaleY);
+      if (spec.anchor) {
+        // Anchored gear: a tight-cropped image parked at a point on the body,
+        // positioned here rather than baked into the PNG. That is what lets
+        // the fitting panel move it live — and what lets loose, unaligned
+        // source art be used at all.
+        const a = ANCHORS[spec.anchor];
+        const baseW = p.width;
+        const baseH = p.height;
+        // Anchor x is a fraction across the body from its centre. Anchor y is
+        // a fraction UP from the feet, and Phaser's +y points down, so it has
+        // to be subtracted. The origin is not necessarily at the feet either
+        // (applyCharacterArt solves originY so the bottom edge lands on the
+        // ground line), so the feet are (1 - originY) * height below it.
+        const ax = (a.x - 0.5) * baseW + (spec.dx ?? 0);
+        const feetBelowOrigin = (1 - p.originY) * baseH;
+        const ay = feetBelowOrigin - a.y * baseH + (spec.dy ?? 0);
+        sprite.setOrigin(0.5, 0.5);
+        sprite.setPosition(p.x + ax * p.scaleX * mirror, p.y + ay * p.scaleY);
+        sprite.setScale(p.scaleX * layerScale, p.scaleY * layerScale);
+      } else {
+        // Pre-aligned full-figure layer: share the body's own seating exactly.
+        const dx = (spec.dx ?? 0) * renderScale * mirror;
+        const dy = (spec.dy ?? 0) * renderScale;
+        sprite.setPosition(p.x + dx, p.y + dy);
+        sprite.setOrigin(p.originX, p.originY);
+        sprite.setScale(p.scaleX * layerScale, p.scaleY * layerScale);
+      }
       sprite.setFlipX(p.flipX);
       sprite.setAlpha(p.alpha);
       sprite.setVisible(p.visible);
@@ -207,6 +258,20 @@ export class CharacterLayerStack {
       if (p.isTinted) sprite.setTint(p.tintTopLeft);
       else sprite.clearTint();
     }
+  }
+
+  /** Tears the overlays down and rebuilds them from the manifest as it
+   * currently stands. The fitting panel mutates CHARACTER_LAYERS live, and a
+   * stack built at spawn would otherwise keep drawing the old spec. */
+  rebuild(): void {
+    for (const sprite of this.sprites) sprite.destroy();
+    this.sprites.length = 0;
+    this.specs.length = 0;
+    for (const spec of CHARACTER_LAYERS[this.kind].slice(1)) {
+      this.specs.push(spec);
+      this.sprites.push(this.scene.add.sprite(this.parent.x, this.parent.y, spec.texture));
+    }
+    this.sync();
   }
 
   destroy(): void {

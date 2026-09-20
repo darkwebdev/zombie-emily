@@ -80,7 +80,10 @@ INFECTED_COMPONENTS = {
     "infected-legs": ((514, 585, 565, 655), "legs"),
 }
 
-# Where each component sits on the emitted canvas, and how big it has to be.
+# Retained only as the starting values now seeded into CHARACTER_LAYERS —
+# positioning itself happens at runtime, so nothing here is baked into a PNG.
+#
+# Where each component sits on the body, and how big it has to be.
 #
 # cx is its centre and ty its top edge, both as fractions of the canvas. `scale`
 # multiplies the shared base scale, and it is not optional padding: the board's
@@ -171,18 +174,18 @@ def main() -> None:
         # with one originY — the contract characterLayers.ts depends on.
         for name, (box, key) in extras.items():
             part = cut(board, box)
-            place = PLACEMENT[key]
-            fit = scale * place.get("scale", 1.0)
-            pw = max(1, round(part.width * fit))
-            ph = max(1, round(part.height * fit))
+            # One shared scale only — the per-part fitting scale lives in the
+            # manifest, where it can be adjusted without re-cutting anything.
+            pw = max(1, round(part.width * scale))
+            ph = max(1, round(part.height * scale))
             part = part.resize((pw, ph), Image.NEAREST)
 
-            canvas = Image.new("RGBA", (cw, TARGET_HEIGHT), (0, 0, 0, 0))
-            x = round(cw * place["cx"] - pw / 2)
-            y = round(TARGET_HEIGHT * place["ty"])
-            canvas.paste(part, (x, y), part)
-            canvas.save(OUT_DIR / f"{name}.png")
-            print(f"{name}.png  {canvas.size}  part {pw}x{ph} at ({x},{y})")
+            # Emitted tight-cropped, NOT pasted onto a full-figure canvas.
+            # Position and size are runtime data now (anchor/dx/dy/scale in
+            # CHARACTER_LAYERS, dragged in the gear-fitting panel), so baking
+            # them here would just freeze one guess into the PNG.
+            part.save(OUT_DIR / f"{name}.png")
+            print(f"{name}.png  {part.size}")
 
 
 if __name__ == "__main__":

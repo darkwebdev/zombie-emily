@@ -301,80 +301,91 @@ export const TESTS: TestCase[] = [
       // assert() once up front, before the scenario's own soldiers exist, to
       // lay out the row labels — so an assert that dereferences a specific
       // soldier throws, kills the run, and the scenario renders with no
-      // checks at all rather than failing ones. Other tests get this for free
-      // by only ever iterating the array; this one names individuals, so it
-      // has to guard them explicitly.
+      // checks at all rather than failing ones.
       const { soldiers } = scene.getTestSnapshot();
       const facingRight = soldiers[0];
       const flipped = soldiers[1];
       const tinted = soldiers[2];
-      const overlayOf = (s?: (typeof soldiers)[number]) => s?.layers?.layerSprites[0];
+      // The demo appends its placeholder band with addLayer(), so it is the
+      // LAST sprite in the stack — not the first. Index 0 is now whatever the
+      // manifest puts at the bottom of the gear (legs), which is an anchored
+      // layer with its own origin and scale by design.
+      const badge = (s?: (typeof soldiers)[number]) =>
+        s?.layers?.layerSprites[s.layers.layerSprites.length - 1];
 
       const checks: Check[] = [
         {
-          label: "All three soldiers carry an overlay layer",
+          label: "All three soldiers carry a stack of overlay layers",
           pass: soldiers.length === 3 && soldiers.every((s) => s.layers.isLayered),
           detail: `count=${soldiers.length} layered=[${soldiers.map((s) => s.layers.isLayered)}]`,
         },
+        {
+          // The manifest gear plus the demo's own added band. If addLayer
+          // stopped appending, this is what notices.
+          label: "addLayer appended on top of the manifest gear",
+          pass: (facingRight?.layers.layerSprites.length ?? 0) > 1,
+          detail: `layers=${facingRight?.layers.layerSprites.length}`,
+        },
       ];
 
-      // Position: an overlay that doesn't track its body is the whole
-      // feature failing, and at rest it looks fine — so check the numbers.
       for (const s of soldiers) {
-        const o = overlayOf(s);
+        const o = badge(s);
         checks.push({
-          label: `${s.state}: overlay sits exactly on its body`,
+          // The added band carries no anchor, so it uses the pre-aligned path
+          // and must sit exactly on the body it belongs to.
+          label: `${s.state}: added layer sits exactly on its body`,
           pass: !!o && o.x === s.x && o.y === s.y,
           detail: `overlay=(${o?.x},${o?.y}) body=(${s.x},${s.y})`,
         });
         checks.push({
-          // Shared origin is what keeps a layer's feet on the same line as
-          // the body's — the artRoster failure mode, one level down.
-          label: `${s.state}: overlay shares the body's origin and scale`,
+          label: `${s.state}: added layer shares the body's origin and scale`,
           pass: !!o && o.originY === s.originY && o.scaleY === s.scaleY,
           detail: `originY ${o?.originY} vs ${s.originY}, scaleY ${o?.scaleY} vs ${s.scaleY}`,
         });
         checks.push({
-          // Must be above its own body but below the next character, or a
-          // layer would render behind the figure it belongs to.
-          label: `${s.state}: overlay draws just above its own body`,
-          pass: !!o && o.depth > s.depth && o.depth - s.depth < 1e-4,
-          detail: `overlay=${o?.depth} body=${s.depth}`,
+          // Every layer must stay inside its own character's slice of the
+          // depth sort, or gear would render behind the figure wearing it.
+          label: `${s.state}: every layer draws just above its own body`,
+          pass:
+            s.layers.layerSprites.length > 0 &&
+            s.layers.layerSprites.every((l) => l.depth > s.depth && l.depth - s.depth < 1e-4),
+          detail: `body=${s.depth} layers=[${s.layers.layerSprites.map((l) => l.depth)}]`,
         });
       }
 
       checks.push({
-        // Facing is mirrored by flipX; an overlay that ignored it would show
-        // gear on the wrong side the moment a soldier turned.
-        label: "Overlay mirrors the body's facing (one right, one flipped)",
+        label: "Layers mirror the body's facing (one right, one flipped)",
         pass:
           !!facingRight &&
           !!flipped &&
-          overlayOf(facingRight)?.flipX === facingRight.flipX &&
-          overlayOf(flipped)?.flipX === flipped.flipX &&
+          facingRight.layers.layerSprites.every((l) => l.flipX === facingRight.flipX) &&
+          flipped.layers.layerSprites.every((l) => l.flipX === flipped.flipX) &&
           facingRight.flipX !== flipped.flipX,
-        detail: `right=${overlayOf(facingRight)?.flipX}/${facingRight?.flipX} flipped=${overlayOf(flipped)?.flipX}/${flipped?.flipX}`,
+        detail: `right=${facingRight?.flipX} flipped=${flipped?.flipX}`,
       });
 
       checks.push({
-        // The one that would ship broken and look merely "a bit off": state
-        // tints are how a soldier is read, so a green body under untinted
-        // gear misreports paralysis.
-        label: "Paralyze tint reaches the overlay, not just the body",
+        // The one that would ship looking merely "a bit off": state tints are
+        // how a soldier is read, so a green body under untinted gear
+        // misreports paralysis.
+        label: "Paralyze tint reaches every layer, not just the body",
         pass:
           !!tinted &&
           tinted.isTinted &&
-          overlayOf(tinted)?.isTinted === true &&
-          overlayOf(tinted)?.tintTopLeft === tinted.tintTopLeft,
-        detail: `body=${tinted?.tintTopLeft?.toString(16)} overlay=${overlayOf(tinted)?.tintTopLeft?.toString(16)}`,
+          tinted.layers.layerSprites.length > 0 &&
+          tinted.layers.layerSprites.every((l) => l.isTinted && l.tintTopLeft === tinted.tintTopLeft),
+        detail: `body=${tinted?.tintTopLeft?.toString(16)} layers=[${tinted?.layers.layerSprites.map((l) => l.tintTopLeft?.toString(16))}]`,
       });
 
       checks.push({
-        // And the contrast case, or the check above would pass on a stack
-        // that simply tinted everything unconditionally.
-        label: "An untinted soldier's overlay is untinted too",
-        pass: !!facingRight && !facingRight.isTinted && overlayOf(facingRight)?.isTinted === false,
-        detail: `body=${facingRight?.isTinted} overlay=${overlayOf(facingRight)?.isTinted}`,
+        // Contrast case, or the check above would pass on a stack that simply
+        // tinted everything unconditionally.
+        label: "An untinted soldier's layers are untinted too",
+        pass:
+          !!facingRight &&
+          !facingRight.isTinted &&
+          facingRight.layers.layerSprites.every((l) => !l.isTinted),
+        detail: `body=${facingRight?.isTinted}`,
       });
 
       return checks;

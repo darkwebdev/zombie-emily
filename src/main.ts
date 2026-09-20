@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { WORLD } from "./config/tuning";
 import { GameScene } from "./scenes/GameScene";
 import { mountDemoPanel } from "./debug/DemoPanel";
+import { mountGearFitPanel } from "./debug/GearFitPanel";
 import { mountTouchControls } from "./systems/touchControls";
 
 const debugMode = new URLSearchParams(location.search).has("debug");
@@ -42,4 +43,5 @@ mountTouchControls();
 
 if (debugMode) {
   mountDemoPanel(game, "game");
+  mountGearFitPanel(game, "game");
 }

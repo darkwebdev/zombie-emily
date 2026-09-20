@@ -314,6 +314,14 @@ export class GameScene extends Phaser.Scene {
     this.updateDebugLabels();
   }
 
+  /** Rebuilds every character's overlay stack from the current manifest.
+   * Used by the gear-fitting panel, which edits CHARACTER_LAYERS in place and
+   * needs the change on screen immediately rather than on the next spawn. */
+  resyncCharacterLayers(): void {
+    for (const s of this.soldiers) s.layers.rebuild();
+    for (const f of this.followers) f.layers.rebuild();
+  }
+
   /** Glues every character's overlay images to it (characterLayers.ts). A
    * no-op for single-layer kinds, which is all of them until #37's modular
    * art lands. */
