@@ -130,6 +130,19 @@ Rules that make this worth having:
 - **One fork shared by two issues gets its own issue**, and both point at it. [#29](https://github.com/darkwebdev/zombie-emily/issues/29) (the third-input-key question, shared by [#9](https://github.com/darkwebdev/zombie-emily/issues/9) and [#21](https://github.com/darkwebdev/zombie-emily/issues/21)) is the worked example. Never let the same decision be re-derived in two places.
 - **[#30](https://github.com/darkwebdev/zombie-emily/issues/30) is the decision queue** — a living index of every open issue bucketed this way, one line each. Keep it in sync as issues open, close, or change bucket; it's the page the user opens to find what's blocked on them.
 - **The four skeletons live in `.github/ISSUE_TEMPLATE/`** — one file per bucket, each with the exact ask-block heading, the matching labels, and the section order. GitHub only applies them in the web UI, and issues here are filed with `gh issue create --body`, which bypasses templates entirely. **So copy the matching template's shape when filing an issue** rather than composing one freehand; that's what keeps agent-created issues conforming. [#37](https://github.com/darkwebdev/zombie-emily/issues/37) is the worked example of what going freehand produces — no ask-block, no status label, and a buried fork that had to be retrofitted.
+- **Filing one with `gh`: start from the template file, don't retype it.** Two things GitHub does for you in the web UI and `gh` does not, both of which produce a malformed issue if you forget:
+  - The YAML frontmatter (`name`/`about`/`labels`) is stripped by the web UI but `--body-file` would paste it verbatim into the issue body. Slice from the ask-block marker instead, which every template has.
+  - The frontmatter's `labels:` line is **not** applied outside the web UI, so pass `--label` yourself. An issue with the right block and no status label is invisible to the filters in [#30](https://github.com/darkwebdev/zombie-emily/issues/30).
+
+  ```sh
+  # 1. Pick the bucket, strip the frontmatter, fill in the placeholders.
+  sed -n '/<!-- ask-block -->/,$p' .github/ISSUE_TEMPLATE/decision-needed.md > /tmp/issue.md
+  #    (edit /tmp/issue.md — every <placeholder> and every HTML comment goes)
+  # 2. File it, applying the same labels the template's frontmatter names.
+  gh issue create --title "..." --body-file /tmp/issue.md --label design,decision-needed
+  ```
+
+  Then add it to [#30](https://github.com/darkwebdev/zombie-emily/issues/30)'s queue, and cross-link whatever it relates to.
 
 #### Who's commenting
 
