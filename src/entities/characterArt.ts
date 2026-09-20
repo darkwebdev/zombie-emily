@@ -8,6 +8,19 @@ import riflemanUrl from "../assets/enemy-rifleman.png";
 import baseUrl from "../assets/follower-base.png";
 import bruteUrl from "../assets/follower-brute.png";
 
+// Modular layer set, cut from art/modules-board.png by tools/extract_modules.py.
+import humanBaseUrl from "../assets/human-base.png";
+import infectedBaseUrl from "../assets/infected-base.png";
+import headHelmetUrl from "../assets/head-helmet.png";
+import headHoodUrl from "../assets/head-hood.png";
+import torsoVestUrl from "../assets/torso-vest.png";
+import legsPantsUrl from "../assets/legs-pants.png";
+import rifleAssaultUrl from "../assets/rifle-assault.png";
+import rifleSniperUrl from "../assets/rifle-sniper.png";
+import shieldRiotUrl from "../assets/shield-riot.png";
+import infectedTorsoUrl from "../assets/infected-torso-torn.png";
+import infectedLegsUrl from "../assets/infected-legs.png";
+
 /** Texture key per character kind — the *base* layer, which is the texture the
  * entity sprite itself carries and the one `applyCharacterArt` sizes and seats
  * everything against.
@@ -25,6 +38,17 @@ const URLS: Record<string, string> = {
   "enemy-rifleman": riflemanUrl,
   "follower-base": baseUrl,
   "follower-brute": bruteUrl,
+  "human-base": humanBaseUrl,
+  "infected-base": infectedBaseUrl,
+  "head-helmet": headHelmetUrl,
+  "head-hood": headHoodUrl,
+  "torso-vest": torsoVestUrl,
+  "legs-pants": legsPantsUrl,
+  "rifle-assault": rifleAssaultUrl,
+  "rifle-sniper": rifleSniperUrl,
+  "shield-riot": shieldRiotUrl,
+  "infected-torso-torn": infectedTorsoUrl,
+  "infected-legs": infectedLegsUrl,
 };
 
 /** Call from the scene's preload(). One call covers every enemy and follower

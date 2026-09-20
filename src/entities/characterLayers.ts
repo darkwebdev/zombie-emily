@@ -31,10 +31,41 @@ export interface CharacterLayer {
  * the game renders exactly as it did before. Adding modular art means adding
  * entries here; nothing else has to change. See issue #37. */
 export const CHARACTER_LAYERS: Record<EnemyKind | FollowerKind, CharacterLayer[]> = {
-  STANDARD: [{ texture: "enemy-standard" }],
-  SHIELD: [{ texture: "enemy-shield" }],
-  RIFLEMAN: [{ texture: "enemy-rifleman" }],
-  BASE: [{ texture: "follower-base" }],
+  // Layer 0 is the body; gear stacks over it bottom-up, so legs draw under
+  // the vest and the weapon draws over everything it is held in front of.
+  STANDARD: [
+    { texture: "human-base" },
+    { texture: "legs-pants" },
+    { texture: "torso-vest" },
+    { texture: "head-helmet" },
+    { texture: "rifle-assault" },
+  ],
+  // Same soldier, different head and weapon — which is the entire point of
+  // the modular set: one body, a loadout per kind.
+  RIFLEMAN: [
+    { texture: "human-base" },
+    { texture: "legs-pants" },
+    { texture: "torso-vest" },
+    { texture: "head-hood" },
+    { texture: "rifle-sniper" },
+  ],
+  SHIELD: [
+    { texture: "human-base" },
+    { texture: "legs-pants" },
+    { texture: "torso-vest" },
+    { texture: "head-helmet" },
+    { texture: "shield-riot" },
+  ],
+  // The infected wear the same gear silhouettes, torn — which is what makes
+  // a conversion readable as "that used to be a soldier". No weapon: both
+  // boards mark the infected weapon column (NONE).
+  BASE: [
+    { texture: "infected-base" },
+    { texture: "infected-legs" },
+    { texture: "infected-torso-torn" },
+  ],
+  // Still a single finished figure: the boards carry no brute components,
+  // and its whole job is a silhouette that shares nothing with a soldier.
   BRUTE: [{ texture: "follower-brute" }],
 };
 
