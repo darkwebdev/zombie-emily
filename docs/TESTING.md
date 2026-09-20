@@ -16,7 +16,7 @@ Append `?debug=1` to the dev URL (`src/main.ts` mounts `DemoPanel` only then). I
 
 ## The test suite (`src/debug/tests.ts`)
 
-One or more `TestCase` per demo (`TESTS: TestCase[]` — 40 cases across the 34 demos as of this writing). Shapes:
+One or more `TestCase` per demo (`TESTS: TestCase[]` — 41 cases across the 34 demos as of this writing). Shapes:
 
 ```ts
 interface Check { label: string; pass: boolean; detail?: string }

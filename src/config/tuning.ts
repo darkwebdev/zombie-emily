@@ -324,18 +324,64 @@ export const LIMB = {
   },
 };
 
-// Screen-space layout for the fixed top-left panel (systems/Hud.ts). Only the
-// ammo readout is listed: the HP/aggro bar geometry predates this block and
-// still lives inline there. Coordinates are screen pixels, unzoomed.
+// Layout for the fixed top-left panel (systems/Hud.ts). Every number here is
+// in *world* pixels — the panel is pinned with screenPin.ts and then
+// magnified by WORLD.zoom, so it lands on screen three times larger than it
+// reads here, against a playfield only WORLD.width (320) across.
+//
+// That relationship is what made the first version overbearing: a 236x66
+// panel is 74% of the screen's width and a third of its height, drawn over
+// the playfield, with an HP bar more than twice as long as Emily is tall for
+// a value that is one of ten. The panel below is roughly a quarter of that
+// area. The constraint when changing it is that the whole thing stays inside
+// panelWidth/panelHeight — nothing here is clipped, so an overflowing pip row
+// or a long horde label just draws out over the game (the old ammo pips ran
+// 32px past the panel's own right edge and nobody noticed).
 export const HUD = {
-  ammoLabelX: 150,
-  ammoPipX: 196,
-  ammoPipY: 59,
-  ammoPipWidth: 16,
-  ammoPipHeight: 10,
-  ammoPipGap: 4,
+  panelX: 6,
+  panelY: 5,
+  panelWidth: 140,
+  panelHeight: 29,
+  panelRadius: 3,
+  panelAlpha: 0.45,
+
+  // Both bars share an x/width so they read as one stack.
+  barX: 10,
+  barWidth: 132,
+  hpY: 8,
+  hpHeight: 7,
+  aggroY: 17,
+  aggroHeight: 4,
+
+  // The text row and the pips sit on the same line, pips last so the row
+  // reads left-to-right as horde → ammo.
+  fontSize: "8px",
+  textY: 23,
+  hordeTextX: 10,
+  ammoLabelX: 86,
+  ammoPipX: 118,
+  ammoPipY: 24,
+  ammoPipWidth: 9,
+  ammoPipHeight: 6,
+  ammoPipGap: 3,
+
+  // Emily's hp used to be printed above her head, where a readout that
+  // follows the character costs a glance to wherever she happens to be —
+  // the same reason ammo was moved here. The bar alone shows a proportion
+  // but not the actual numbers, so the figures ride inside it, right-aligned
+  // so a changing hp doesn't shift the text around. Smaller than the row
+  // font because it has to fit within hpHeight.
+  barFontSize: "6px",
+  hpTextRightInset: 2,
   ammoPipColor: 0xd9b382,
   ammoPipEmptyColor: 0x2a2a2a,
+
+  hpBackColor: 0x2a2a2a,
+  hpFillColor: 0xc0392b,
+  aggroBackColor: 0x2a2a2a,
+  aggroFillColor: 0xe08a1e,
+  aggroFullColor: 0x6fe3ff,
+  aggroPulsePeriod: 0.5,
 };
 
 export const AGGRO = {

@@ -1,8 +1,9 @@
 import Phaser from "phaser";
-import { BACKGROUND, BRUTE, CHARACTER_ART, COMBAT, EMILY, FLANK, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
+import { BACKGROUND, BRUTE, CHARACTER_ART, COMBAT, EMILY, FLANK, EMILY_SPRITE, FOLLOWER, GROUND_LINE, HORDE_SPREAD, HUD, LIMB, RIFLEMAN, SHIELD_TROOPER, SOLDIER, WORLD } from "../config/tuning";
 import { EMILY_ANIM } from "../entities/Emily";
 import { SPAWNS } from "../levels/level1";
 import { touchInput } from "../systems/touchControls";
+import { SCREEN_PIN_OFFSET } from "../systems/screenPin";
 import type { DemoName } from "./demos";
 import type { Follower } from "../entities/Follower";
 import type { Soldier } from "../entities/Soldier";
@@ -930,6 +931,76 @@ export const TESTS: TestCase[] = [
           detail: `kinds=[${s.followers.map((f) => f.kind)}]`,
         },
         { label: "Soldier consumed", pass: s.soldiers.length === 0, detail: `soldiers=${s.soldiers.length}` },
+      ];
+    }),
+  },
+  {
+    demo: "hordeSpread",
+    name: "HUD: every readout inside its panel, and the panel off the playfield",
+    checkpoints: single(60, (scene) => {
+      // The HUD is authored in world pixels and pinned, so its objects carry
+      // SCREEN_PIN_OFFSET on top of the numbers in tuning.ts; take it back
+      // off to compare against the panel rect as authored.
+      const texts = (scene.children.list as Phaser.GameObjects.GameObject[])
+        .filter((o): o is Phaser.GameObjects.Text => o instanceof Phaser.GameObjects.Text)
+        .filter((t) => t.depth === 1000)
+        .map((t) => {
+          const left = t.x - SCREEN_PIN_OFFSET.x - t.originX * t.width;
+          const top = t.y - SCREEN_PIN_OFFSET.y - t.originY * t.height;
+          return { text: t.text, left, right: left + t.width, top, bottom: top + t.height };
+        });
+      const panel = {
+        left: HUD.panelX,
+        right: HUD.panelX + HUD.panelWidth,
+        top: HUD.panelY,
+        bottom: HUD.panelY + HUD.panelHeight,
+      };
+      const pipsRight =
+        HUD.ammoPipX + LIMB.ammoMax * HUD.ammoPipWidth + (LIMB.ammoMax - 1) * HUD.ammoPipGap;
+      // This demo carries Brutes, so the horde label is at its widest here
+      // ("HORDE 8 (5B)") — the case most likely to run into the ammo label.
+      const horde = texts.find((t) => t.text.startsWith("HORDE"));
+      const ammo = texts.find((t) => t.text.startsWith("AMMO"));
+      return [
+        {
+          label: "Both row labels and the hp readout exist",
+          pass: texts.length === 3 && !!horde && !!ammo,
+          detail: texts.map((t) => `"${t.text}"`).join(" "),
+        },
+        {
+          // The bug this guards is silent: nothing clips the HUD, so an
+          // overflowing element just draws out over the game. The original
+          // ammo pips ran 32px past the panel's own right edge unnoticed.
+          label: "Every text inside the panel",
+          pass: texts.every(
+            (t) =>
+              t.left >= panel.left &&
+              t.right <= panel.right &&
+              t.top >= panel.top &&
+              t.bottom <= panel.bottom,
+          ),
+          detail: texts
+            .map((t) => `${t.text}:[${t.left.toFixed(0)},${t.right.toFixed(0)}]`)
+            .join(" "),
+        },
+        {
+          label: "Ammo pips inside the panel",
+          pass: pipsRight <= panel.right && HUD.ammoPipY + HUD.ammoPipHeight <= panel.bottom,
+          detail: `pipsRight=${pipsRight} panelRight=${panel.right}`,
+        },
+        {
+          label: "The horde label clears the ammo label rather than drawing through it",
+          pass: !!horde && !!ammo && horde.right <= ammo.left,
+          detail: `horde.right=${horde ? horde.right.toFixed(0) : "-"} ammo.left=${ammo ? ammo.left.toFixed(0) : "-"}`,
+        },
+        {
+          // The actual ask behind shrinking it: the panel sits over the
+          // playfield, so its footprint is screen the player can't see the
+          // game through. It used to be 74% x 37%.
+          label: "Panel stays a corner badge, not a banner (<50% wide, <20% tall)",
+          pass: HUD.panelWidth < WORLD.width * 0.5 && HUD.panelHeight < WORLD.height * 0.2,
+          detail: `${HUD.panelWidth}x${HUD.panelHeight} of ${WORLD.width}x${WORLD.height}`,
+        },
       ];
     }),
   },

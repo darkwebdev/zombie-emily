@@ -312,8 +312,13 @@ export class GameScene extends Phaser.Scene {
     this.debugLabels.forEach((t) => t.destroy());
     this.debugLabels = [];
 
+    // Emily has no label of her own: her hp and ammo are the two values the
+    // HUD already shows, permanently and in a fixed place, so a copy of them
+    // stapled to her head is the exact readout-that-moves-around-the-screen
+    // the HUD exists to replace (see Hud.ts). Every other label here reports
+    // state that appears nowhere else — a soldier's FSM state and facing, a
+    // follower's mode and whether it has rejoined the trail.
     const entries: { x: number; y: number; text: string }[] = [
-      { x: this.emily.x, y: this.emily.y, text: `EMILY hp:${this.emily.hp} ammo:${this.ammo}` },
       ...this.soldiers.map((s) => {
         const prefix = s.kind === "SHIELD" ? "SHIELD " : s.kind === "RIFLEMAN" ? "RIFLE " : "";
         const aim = s.isAiming ? ` aim:${s.aimRemaining.toFixed(1)}` : "";
