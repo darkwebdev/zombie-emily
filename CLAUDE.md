@@ -92,6 +92,26 @@ Feed → input/movement/throw → Emily tick → breadcrumb trail → aggro → 
 - **When the user approves an issue's decision (e.g. by commenting approval on it), write that decision into its doc via the `planner` subagent, then close the issue** — don't leave finalization for later or do the doc-writing directly in whatever model the session happens to be running. This is the same "design decisions go through planner" rule above, applied to the step that actually lands the decision permanently, since that write is exactly as consequential as the design work that produced it.
 - **Unscoped ideas start in `docs/IDEAS.md`, filed via `/save-idea`.** When the user drops a new idea mid-conversation, use `/save-idea` rather than writing it up inline — it spawns a background subagent that cross-references existing issues and files the entry, so capturing an idea doesn't interrupt whatever's currently in progress. When the backlog there needs clearing out, run `/triage-ideas` — it sends each idea through the `planner` subagent and turns the result into GitHub issues per the rules above. Both are manual-trigger only; nothing runs either automatically.
 
+#### Unapproved features and experiments ship as branch previews
+
+**Anything not yet approved — a new feature, an experiment, a "what if we tried" — goes on its own branch, gets deployed to its own preview URL, and that link goes in the issue it belongs to.** The point is that discussing a change should never be an exercise in imagining it: the issue should carry a link that opens the thing running. Only approved work lands on `main`, which is what the root site serves.
+
+This is why the debug panel writes its selection into the URL (`?debug=1&demo=<name>`) — a preview link can point at the exact scenario under discussion, not just at the game.
+
+**One Pages site per repo, so previews are subpaths, not separate sites.** GitHub gives a repo a single Pages site, and `actions/deploy-pages` replaces the whole thing on every run — a second branch deploying that way would delete the main site rather than sit beside it. So previews live under a path on the one site:
+
+| What | Where |
+| --- | --- |
+| `main` | `https://darkwebdev.github.io/zombie-emily/` |
+| branch `foo` | `https://darkwebdev.github.io/zombie-emily/preview/foo/` |
+
+Two things this requires, and neither exists yet — **build them before relying on this convention**:
+
+- **A configurable Vite base.** `vite.config.ts` hardcodes `base: "/zombie-emily/"`. A preview served from `/zombie-emily/preview/foo/` needs that base, or every asset 404s. Drive it from an env var the workflow sets.
+- **A publishing mechanism that doesn't wipe the root.** The usual answer is to serve Pages from a `gh-pages` branch instead of an Actions artifact, with `main` publishing to its root and branches publishing into `preview/<branch>/`. That means switching the Pages source, so it's a deliberate change rather than an additive one.
+
+Housekeeping: delete a preview when its branch merges or is abandoned, and say so in the issue — a stale link that still opens is worse than a dead one, because it silently shows the wrong build.
+
 #### Every issue states its ask at the top
 
 Design issues in this repo are long, and a reader should never have to scan one to discover it wasn't asking them anything. **Every issue opens with a short block, before any exposition, marked `<!-- ask-block -->`, that says which of four things it wants** — and carries the matching label:
