@@ -1,23 +1,29 @@
 name: Deploy to GitHub Pages
 
+# Publishes main to the root of the Pages site. Branch previews live under
+# preview/<branch>/ on the same site (see preview.yml and CLAUDE.md), because
+# a repo only gets one Pages site.
+#
+# Publishing works by committing the build to the gh-pages branch rather than
+# uploading a Pages artifact: an artifact deploy replaces the entire site
+# every run, which would delete every live preview each time main deployed.
+
 on:
   push:
     branches: [main]
   workflow_dispatch: {}
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# Only one deploy at a time; a new push cancels any in-flight deploy rather
-# than queuing behind it, since only the latest main matters for a live site.
+# Both this and preview.yml commit to the same gh-pages branch, so they share
+# one concurrency group — two jobs pushing to it at once would race and one
+# would fail on a non-fast-forward.
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: gh-pages-publish
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,16 +33,30 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
+        env:
+          PAGES_BASE: /zombie-emily/
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish to gh-pages root
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch gh-pages \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" out
+
+          # Replace the root, but leave preview/ alone — those belong to other
+          # branches and must survive a main deploy.
+          find out -mindepth 1 -maxdepth 1 \
+            ! -name .git ! -name preview -exec rm -rf {} +
+          cp -R dist/. out/
+          # Without this, Pages runs Jekyll and drops any file or directory
+          # whose name starts with an underscore.
+          touch out/.nojekyll
+
+          cd out
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet && echo "no change" && exit 0
+          git commit -m "Deploy main: ${GITHUB_SHA::7}"
+          git push origin gh-pages

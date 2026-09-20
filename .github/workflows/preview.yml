@@ -1,0 +1,95 @@
+name: Deploy branch preview
+
+# Every branch except main gets its own preview build at
+# /zombie-emily/preview/<branch>/ on the one Pages site, so an unapproved
+# feature or experiment can be linked from its issue and opened running.
+# See "Unapproved features and experiments ship as branch previews" in
+# CLAUDE.md.
+#
+# Deleting the branch removes its preview — see the cleanup job below.
+
+on:
+  push:
+    branches-ignore: [main, gh-pages]
+  delete: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages-publish
+
+jobs:
+  publish:
+    if: github.event_name != 'delete'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Branch names may contain characters that don't belong in a URL path
+      # (feat/foo being the common one), so the preview directory uses a
+      # flattened form of the name rather than the name itself.
+      - name: Compute preview slug
+        id: slug
+        run: echo "value=$(echo "${GITHUB_REF_NAME}" | tr '/' '-' | tr -cd '[:alnum:]._-')" >> "$GITHUB_OUTPUT"
+
+      - run: npm run build
+        env:
+          PAGES_BASE: /zombie-emily/preview/${{ steps.slug.outputs.value }}/
+
+      - name: Publish to gh-pages preview/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLUG: ${{ steps.slug.outputs.value }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch gh-pages \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" out
+
+          # Only this branch's own directory is touched — the root site and
+          # every other preview are left exactly as they are.
+          rm -rf "out/preview/${SLUG}"
+          mkdir -p "out/preview/${SLUG}"
+          cp -R dist/. "out/preview/${SLUG}/"
+
+          cd out
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet && echo "no change" && exit 0
+          git commit -m "Preview ${SLUG}: ${GITHUB_SHA::7}"
+          git push origin gh-pages
+
+      - name: Summary
+        run: |
+          echo "Preview: https://darkwebdev.github.io/zombie-emily/preview/${{ steps.slug.outputs.value }}/" >> "$GITHUB_STEP_SUMMARY"
+
+  # A preview that outlives its branch is worse than no preview: the link
+  # still opens, so it silently shows a build nobody is working on any more.
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove the deleted branch's preview
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DELETED: ${{ github.event.ref }}
+        run: |
+          set -euo pipefail
+          SLUG=$(echo "${DELETED}" | tr '/' '-' | tr -cd '[:alnum:]._-')
+          git clone --depth 1 --branch gh-pages \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" out
+          cd out
+          [ -d "preview/${SLUG}" ] || { echo "no preview for ${SLUG}"; exit 0; }
+          rm -rf "preview/${SLUG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove preview for deleted branch ${SLUG}"
+          git push origin gh-pages
