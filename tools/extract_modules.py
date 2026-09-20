@@ -62,29 +62,47 @@ COMPONENTS = {
     "head-helmet": ((161, 84, 207, 123), "head"),
     "head-hood": ((161, 133, 207, 175), "head"),
     "torso-vest": ((244, 85, 289, 132), "torso"),
-    "legs-pants": ((514, 84, 565, 147), "legs"),
+    # Row 2 of PANTS/LEG ARMOR, not row 1: row 1 is knee-length shorts with
+    # pads, which over a base body already in shorts just reads as bare shins
+    # in kneepads. Row 2 is the full-length trouser.
+    "legs-pants": ((514, 156, 565, 229), "legs"),
     "rifle-assault": ((869, 106, 972, 140), "weapon"),
     "rifle-sniper": ((869, 181, 972, 213), "weapon"),
     "shield-riot": ((1011, 83, 1055, 146), "shield"),
 }
 
 INFECTED_COMPONENTS = {
-    "infected-torso-torn": ((244, 429, 289, 477), "torso"),
-    "infected-legs": ((514, 428, 565, 493), "legs"),
+    # The infected's ragged gear is in CHEST/SHOULDER ARMOR, not the VESTS
+    # column — the latter holds the same intact plate carriers the humans wear.
+    "infected-torso-torn": ((390, 605, 432, 655), "torso"),
+    # Row 3, not row 2: row 2 of the infected pants column is a pair of bare
+    # gored legs rather than a garment, which composites as a dark blob.
+    "infected-legs": ((514, 585, 565, 655), "legs"),
 }
 
-# Where each kind of component sits on the emitted canvas, as fractions of it.
-# cx is the centre of the component; ty is its top edge. Hand-tuned against the
-# board's own assembled EXAMPLE VARIANTS — there is no way to derive these,
-# because the catalogue cells carry no anchor.
+# Where each component sits on the emitted canvas, and how big it has to be.
+#
+# cx is its centre and ty its top edge, both as fractions of the canvas. `scale`
+# multiplies the shared base scale, and it is not optional padding: the board's
+# cells are roughly uniform in size regardless of what body part they hold, so
+# they are icons rather than body-proportioned layers. A helmet icon (46x39) is
+# about right for a head on a 210px body, but a trouser icon (51x73) is ~25%
+# short of the ~95px those legs need. Without a per-part scale the trousers
+# render as knee pads and the shins stay bare.
+#
+# All of these are hand-tuned against the board's own assembled examples —
+# nothing here can be derived, because the cells carry no anchor and no
+# indication of intended size.
 PLACEMENT = {
-    "head": {"cx": 0.50, "ty": 0.00},
-    "torso": {"cx": 0.50, "ty": 0.22},
-    "legs": {"cx": 0.50, "ty": 0.50},
+    "head": {"cx": 0.50, "ty": 0.00, "scale": 1.0},
+    "torso": {"cx": 0.50, "ty": 0.21, "scale": 1.15},
+    # Waist to boot-top: the tallest run on the figure, and the one the
+    # icon-sized source art falls shortest of.
+    "legs": {"cx": 0.50, "ty": 0.42, "scale": 1.45},
     # Held out to the figure's right, at chest height.
-    "weapon": {"cx": 0.62, "ty": 0.33},
+    "weapon": {"cx": 0.62, "ty": 0.33, "scale": 1.0},
     # Carried on the left arm, covering most of the torso.
-    "shield": {"cx": 0.30, "ty": 0.28},
+    "shield": {"cx": 0.30, "ty": 0.26, "scale": 1.15},
 }
 
 
@@ -153,11 +171,12 @@ def main() -> None:
         # with one originY — the contract characterLayers.ts depends on.
         for name, (box, key) in extras.items():
             part = cut(board, box)
-            pw = max(1, round(part.width * scale))
-            ph = max(1, round(part.height * scale))
+            place = PLACEMENT[key]
+            fit = scale * place.get("scale", 1.0)
+            pw = max(1, round(part.width * fit))
+            ph = max(1, round(part.height * fit))
             part = part.resize((pw, ph), Image.NEAREST)
 
-            place = PLACEMENT[key]
             canvas = Image.new("RGBA", (cw, TARGET_HEIGHT), (0, 0, 0, 0))
             x = round(cw * place["cx"] - pw / 2)
             y = round(TARGET_HEIGHT * place["ty"])
