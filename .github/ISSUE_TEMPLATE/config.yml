@@ -1,0 +1,9 @@
+# Every issue in this repo opens with an ask-block saying which of four things
+# it wants (see "Every issue states its ask at the top" in CLAUDE.md). A blank
+# issue skips that, so the web UI doesn't offer one.
+#
+# Note this only governs the web UI — `gh issue create --body ...` bypasses
+# templates entirely, which is how most issues here are actually filed. For
+# agents, CLAUDE.md is what binds; these templates are the canonical skeletons
+# to copy from.
+blank_issues_enabled: false

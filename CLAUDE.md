@@ -129,6 +129,7 @@ Rules that make this worth having:
 - **A question must never be buried.** If a design pass leaves an open fork, it goes in the top block — not in an "Open questions" heading two-thirds down. Tuning unknowns are *not* forks; they're `needs-playtest`.
 - **One fork shared by two issues gets its own issue**, and both point at it. [#29](https://github.com/darkwebdev/zombie-emily/issues/29) (the third-input-key question, shared by [#9](https://github.com/darkwebdev/zombie-emily/issues/9) and [#21](https://github.com/darkwebdev/zombie-emily/issues/21)) is the worked example. Never let the same decision be re-derived in two places.
 - **[#30](https://github.com/darkwebdev/zombie-emily/issues/30) is the decision queue** — a living index of every open issue bucketed this way, one line each. Keep it in sync as issues open, close, or change bucket; it's the page the user opens to find what's blocked on them.
+- **The four skeletons live in `.github/ISSUE_TEMPLATE/`** — one file per bucket, each with the exact ask-block heading, the matching labels, and the section order. GitHub only applies them in the web UI, and issues here are filed with `gh issue create --body`, which bypasses templates entirely. **So copy the matching template's shape when filing an issue** rather than composing one freehand; that's what keeps agent-created issues conforming. [#37](https://github.com/darkwebdev/zombie-emily/issues/37) is the worked example of what going freehand produces — no ask-block, no status label, and a buried fork that had to be retrofitted.
 
 #### Who's commenting
 
