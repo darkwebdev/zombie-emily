@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { DEMOS, DEMO_GROUPS, DemoName, UNGROUPED_DEMO } from "./demos";
 import { runAllTests, RunResult } from "./TestRunner";
-import { TESTS, Check } from "./tests";
+import { TESTS, Check, Checkpoint, TestCase } from "./tests";
 import type { GameScene } from "../scenes/GameScene";
 import { hitboxesEnabled, setHitboxes } from "./hitboxes";
 
@@ -190,6 +190,29 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
   // screen.
   let runToken = 0;
 
+  /** Runs a checkpoint's assert without letting a throw take the whole run
+   * down with it.
+   *
+   * assert() is called twice per checkpoint: once up front against whatever
+   * state the scene happens to be in, purely to harvest row labels, and again
+   * when the checkpoint's real time elapses. The early call is the dangerous
+   * one — the scenario's own entities may not exist yet, so an assert that
+   * indexes a specific soldier rather than iterating the array throws on
+   * undefined. Unguarded, that rejects the async run and the scenario renders
+   * with a header and no checks at all, which reads as "the demo link doesn't
+   * run the test" rather than as a broken assert.
+   *
+   * Surfacing the error as a failed check makes it visible where it happened
+   * instead of silent. */
+  function safeAssert(test: TestCase, cp: Checkpoint, scene: GameScene): Check[] {
+    try {
+      return cp.assert(scene);
+    } catch (err) {
+      console.error(`[demo panel] assert threw in "${test.name}"`, err);
+      return [{ label: `assert threw: ${err instanceof Error ? err.message : String(err)}`, pass: false }];
+    }
+  }
+
   /** Applies a demo and, if it has a matching test, watches it resolve in
    * real time on the SAME live scene the user is looking at — no separate
    * fast-forwarded simulation running invisibly behind the display. Every
@@ -242,7 +265,7 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
         results.appendChild(nameRow);
       }
       return t.checkpoints.map((cp) =>
-        cp.assert(liveScene).map((c) => {
+        safeAssert(t, cp, liveScene).map((c) => {
           const row = document.createElement("div");
           row.style.cssText = `color:#999;${single ? "" : "padding-left:14px;"}font-size:10px;`;
           row.textContent = `… ${c.label}`;
@@ -271,7 +294,7 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
         await wait(cp.afterMs);
         if (token !== runToken) return;
         liveScene = game.scene.getScene(sceneKey) as unknown as GameScene;
-        const checks = cp.assert(liveScene);
+        const checks = safeAssert(t, cp, liveScene);
         const rows = rowsPerTestPerCheckpoint[ti][ci];
         checks.forEach((c, i) => {
           const row = rows[i];

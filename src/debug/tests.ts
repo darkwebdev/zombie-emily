@@ -297,17 +297,26 @@ export const TESTS: TestCase[] = [
     demo: "artLayers",
     name: "Runtime layers stay glued to the character they're drawn over",
     checkpoints: single(20, (scene) => {
+      // Every accessor here is null-safe on purpose. The demo panel calls
+      // assert() once up front, before the scenario's own soldiers exist, to
+      // lay out the row labels — so an assert that dereferences a specific
+      // soldier throws, kills the run, and the scenario renders with no
+      // checks at all rather than failing ones. Other tests get this for free
+      // by only ever iterating the array; this one names individuals, so it
+      // has to guard them explicitly.
       const { soldiers } = scene.getTestSnapshot();
-      const [facingRight, flipped, tinted] = soldiers;
+      const facingRight = soldiers[0];
+      const flipped = soldiers[1];
+      const tinted = soldiers[2];
+      const overlayOf = (s?: (typeof soldiers)[number]) => s?.layers?.layerSprites[0];
+
       const checks: Check[] = [
         {
           label: "All three soldiers carry an overlay layer",
           pass: soldiers.length === 3 && soldiers.every((s) => s.layers.isLayered),
-          detail: `layered=[${soldiers.map((s) => s.layers.isLayered)}]`,
+          detail: `count=${soldiers.length} layered=[${soldiers.map((s) => s.layers.isLayered)}]`,
         },
       ];
-
-      const overlayOf = (s: (typeof soldiers)[number]) => s.layers.layerSprites[0];
 
       // Position: an overlay that doesn't track its body is the whole
       // feature failing, and at rest it looks fine — so check the numbers.
@@ -339,10 +348,12 @@ export const TESTS: TestCase[] = [
         // gear on the wrong side the moment a soldier turned.
         label: "Overlay mirrors the body's facing (one right, one flipped)",
         pass:
+          !!facingRight &&
+          !!flipped &&
           overlayOf(facingRight)?.flipX === facingRight.flipX &&
           overlayOf(flipped)?.flipX === flipped.flipX &&
           facingRight.flipX !== flipped.flipX,
-        detail: `right=${overlayOf(facingRight)?.flipX}/${facingRight.flipX} flipped=${overlayOf(flipped)?.flipX}/${flipped.flipX}`,
+        detail: `right=${overlayOf(facingRight)?.flipX}/${facingRight?.flipX} flipped=${overlayOf(flipped)?.flipX}/${flipped?.flipX}`,
       });
 
       checks.push({
@@ -350,16 +361,20 @@ export const TESTS: TestCase[] = [
         // tints are how a soldier is read, so a green body under untinted
         // gear misreports paralysis.
         label: "Paralyze tint reaches the overlay, not just the body",
-        pass: tinted.isTinted && overlayOf(tinted)?.isTinted === true && overlayOf(tinted)?.tintTopLeft === tinted.tintTopLeft,
-        detail: `body=${tinted.tintTopLeft?.toString(16)} overlay=${overlayOf(tinted)?.tintTopLeft?.toString(16)}`,
+        pass:
+          !!tinted &&
+          tinted.isTinted &&
+          overlayOf(tinted)?.isTinted === true &&
+          overlayOf(tinted)?.tintTopLeft === tinted.tintTopLeft,
+        detail: `body=${tinted?.tintTopLeft?.toString(16)} overlay=${overlayOf(tinted)?.tintTopLeft?.toString(16)}`,
       });
 
       checks.push({
         // And the contrast case, or the check above would pass on a stack
         // that simply tinted everything unconditionally.
         label: "An untinted soldier's overlay is untinted too",
-        pass: !facingRight.isTinted && overlayOf(facingRight)?.isTinted === false,
-        detail: `body=${facingRight.isTinted} overlay=${overlayOf(facingRight)?.isTinted}`,
+        pass: !!facingRight && !facingRight.isTinted && overlayOf(facingRight)?.isTinted === false,
+        detail: `body=${facingRight?.isTinted} overlay=${overlayOf(facingRight)?.isTinted}`,
       });
 
       return checks;
