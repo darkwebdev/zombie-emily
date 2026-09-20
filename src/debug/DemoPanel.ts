@@ -17,6 +17,51 @@ interface RunsDemos {
   runDemo(name: DemoName): void;
 }
 
+/** The panel's selection is mirrored into the query string so any scenario
+ * can be linked to, bookmarked, or pasted into a bug report and land the
+ * reader on exactly that scenario, already running.
+ *
+ * replaceState rather than pushState: clicking through ten demos while
+ * hunting a bug would otherwise stack ten history entries, and Back would
+ * walk them one at a time instead of leaving the page. */
+const URL_DEMO = "demo";
+const URL_TESTS = "tests";
+
+function writeSelectionToUrl(key: typeof URL_DEMO | typeof URL_TESTS, value: string): void {
+  const url = new URL(location.href);
+  // Only ever one selection at a time — a URL carrying both a demo and a
+  // full test run would be ambiguous about which one to restore.
+  url.searchParams.delete(URL_DEMO);
+  url.searchParams.delete(URL_TESTS);
+  url.searchParams.set(key, value);
+  history.replaceState(null, "", url);
+}
+
+/** Resolves once the scene is actually running, so a deep link can drive it.
+ * The panel is mounted synchronously right after `new Phaser.Game()` (see
+ * main.ts), which is well before Phaser has booted and registered scenes.
+ *
+ * Two details that both matter:
+ * - It waits for `isActive()`, not merely for the scene object to exist. The
+ *   object is registered at boot, but both restore paths immediately call
+ *   `runDemo()` -> `scene.restart()`, which needs `create()` to have run.
+ * - It polls on setTimeout rather than requestAnimationFrame, which browsers
+ *   throttle to a standstill in a background tab — otherwise a link opened
+ *   in a background tab would sit here forever instead of restoring once the
+ *   tab is eventually looked at. */
+function whenSceneReady(game: Phaser.Game, sceneKey: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + 10_000;
+    const check = (): void => {
+      const scene = game.scene.getScene(sceneKey);
+      if (scene?.sys.isActive()) resolve(true);
+      else if (Date.now() > deadline) resolve(false);
+      else setTimeout(check, 16);
+    };
+    check();
+  });
+}
+
 /** Vertical stack of buttons docked to the right edge of the page, plus an
  * info bar across the top showing the active scenario's name and what it's
  * meant to demonstrate. Each button pokes the live GameScene into a
@@ -281,6 +326,7 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
   testBtn.addEventListener("mouseenter", () => (testBtn.style.background = "#2a5a2a"));
   testBtn.addEventListener("mouseleave", () => (testBtn.style.background = "#1a3a1a"));
   testBtn.addEventListener("click", () => {
+    writeSelectionToUrl(URL_TESTS, "all");
     const runResults = runAllTests(game, sceneKey);
     renderRunResults("All tests", runResults);
 
@@ -314,6 +360,7 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
     btn.addEventListener("mouseenter", () => (btn.style.background = "#2a2a4a"));
     btn.addEventListener("mouseleave", () => (btn.style.background = "#1a1a2e"));
     btn.addEventListener("click", () => {
+      writeSelectionToUrl(URL_DEMO, demo.name);
       runDemoWithTests(demo);
       // Un-focus immediately so Space (aggro) or arrow keys don't get
       // swallowed as a synthetic click on this button afterward.
@@ -323,6 +370,11 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
   };
 
   panel.appendChild(demoButton(DEMOS.find((d) => d.name === UNGROUPED_DEMO)!, false));
+
+  // How to reveal a given demo's branch, so a deep-linked scenario isn't
+  // left running inside a collapsed group with nothing on screen explaining
+  // where it came from.
+  const revealByDemo = new Map<DemoName, () => void>();
 
   // One collapsible branch per group. Expansion state lives in the DOM and
   // the panel is mounted once per page load, so a branch stays open across
@@ -358,10 +410,46 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
 
     for (const name of group.demos) {
       children.appendChild(demoButton(DEMOS.find((d) => d.name === name)!, true));
+      revealByDemo.set(name, () => setOpen(true));
     }
     panel.appendChild(header);
     panel.appendChild(children);
   }
 
   document.body.appendChild(panel);
+
+  // Restore whatever the URL asks for. This is the other half of
+  // writeSelectionToUrl: clicking a button puts the scenario in the URL, and
+  // opening that URL puts the scenario back on screen, already running.
+  void (async () => {
+    const params = new URLSearchParams(location.search);
+    const demoParam = params.get(URL_DEMO);
+    const testsParam = params.get(URL_TESTS);
+    if (!demoParam && !testsParam) return;
+
+    if (!(await whenSceneReady(game, sceneKey))) {
+      infoName.textContent = "Could not restore from URL";
+      infoDesc.textContent = "The scene never became active — pick a scenario from the panel instead.";
+      return;
+    }
+
+    if (testsParam === "all") {
+      const runResults = runAllTests(game, sceneKey);
+      renderRunResults("All tests", runResults);
+      infoName.textContent = "Tests finished";
+      infoDesc.textContent = "Restored from the URL. Scene left on the last test's scenario.";
+      return;
+    }
+
+    const demo = DEMOS.find((d) => d.name === demoParam);
+    if (!demo) {
+      // Silently doing nothing here would look identical to a broken panel,
+      // so say which name failed and what the valid ones are.
+      infoName.textContent = `Unknown demo: ${demoParam}`;
+      infoDesc.textContent = `Not one of: ${DEMOS.map((d) => d.name).join(", ")}`;
+      return;
+    }
+    revealByDemo.get(demo.name)?.();
+    void runDemoWithTests(demo);
+  })();
 }
