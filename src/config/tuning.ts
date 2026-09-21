@@ -17,7 +17,7 @@ export const WORLD = {
  * future kind is tiny. Worth the solve: gear is fitted a pixel at a time, and
  * a pixel at play scale is a third of a screen pixel. */
 export const INSPECT = {
-  fillFraction: 0.82,
+  fillFraction: 0.88,
   /** Also the top of the gear-fitting panel's zoom slider. */
   maxZoom: WORLD.zoom * 5,
 };

@@ -4,6 +4,7 @@ import type { EnemyKind, FollowerKind } from "../config/tuning";
 import type { GameScene } from "../scenes/GameScene";
 import { INSPECT, WORLD } from "../config/tuning";
 import { getPinZoom, setPinZoom } from "../systems/screenPin";
+import type { DebugDock } from "./dock";
 
 type Kind = EnemyKind | FollowerKind;
 
@@ -22,44 +23,19 @@ type Kind = EnemyKind | FollowerKind;
  * the gearFit demo: that one character, alone, frozen, screen-high.
  *
  * It is built to be usable from a phone, because that is where it gets used.
- * On a narrow screen it becomes a bottom sheet (a 16:9 canvas on a portrait
- * screen leaves a black band under it, so the sheet costs no view of the
- * figure), every control is thumb-sized, and each number carries ± buttons —
- * a slider drag can't reliably land on one pixel of dy, which is the unit the
- * whole job is measured in.
+ * It lives as a tab in the drawer under the game (debug/dock.ts) rather than
+ * as an overlay, so opening it shrinks the picture instead of covering the
+ * figure; every control is thumb-sized; and each number carries ± buttons,
+ * because a slider drag can't reliably land on one pixel of dy, which is the
+ * unit the whole job is measured in.
  */
-export function mountGearFitPanel(game: Phaser.Game, sceneKey: string): void {
+export function mountGearFitPanel(game: Phaser.Game, sceneKey: string, dock: DebugDock): void {
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
 
-  const root = document.createElement("div");
-  root.className = "gf-root";
-
-  const title = document.createElement("div");
-  title.className = "gf-title";
-  title.innerHTML = "<span>Gear fitting</span><span>▾</span>";
-  root.appendChild(title);
-
-  const body = document.createElement("div");
-  body.className = "gf-body";
-  root.appendChild(body);
-
-  // Remembered across the restart every demo click performs, and across the
-  // reload a deep link performs — and defaulting to collapsed on a phone,
-  // where an open sheet is most of the screen and the figure is the thing
-  // that was asked for.
-  const OPEN_KEY = "ze-gearfit-open";
-  const setOpen = (open: boolean): void => {
-    body.style.display = open ? "flex" : "none";
-    title.lastElementChild!.textContent = open ? "▾" : "▸";
-    try {
-      localStorage.setItem(OPEN_KEY, open ? "1" : "0");
-    } catch {
-      // Private browsing — the toggle still works, it just isn't remembered.
-    }
-  };
-  title.addEventListener("click", () => setOpen(body.style.display === "none"));
+  const body = dock.addTab("gear", "Gear");
+  body.classList.add("gf-body");
 
   const row = (label: string, el: HTMLElement): HTMLDivElement => {
     const d = document.createElement("div");
@@ -154,15 +130,6 @@ export function mountGearFitPanel(game: Phaser.Game, sceneKey: string): void {
     out,
     hint,
   );
-  document.body.appendChild(root);
-
-  let stored: string | null = null;
-  try {
-    stored = localStorage.getItem(OPEN_KEY);
-  } catch {
-    stored = null;
-  }
-  setOpen(stored === null ? !isNarrow() : stored === "1");
 
   const scene = (): GameScene => game.scene.getScene(sceneKey) as unknown as GameScene;
 
@@ -248,12 +215,10 @@ export function mountGearFitPanel(game: Phaser.Game, sceneKey: string): void {
     requestAnimationFrame(followSceneZoom);
   };
   requestAnimationFrame(followSceneZoom);
-}
 
-/** Matches the CSS breakpoint below; the two have to agree or the panel
- * opens by default on exactly the screens the phone layout is for. */
-function isNarrow(): boolean {
-  return window.matchMedia("(max-width: 720px)").matches;
+  // A link straight to the bench should open on the bench. Any other demo
+  // leaves whichever tab the drawer was last on.
+  if (new URLSearchParams(location.search).get("demo") === "gearFit") dock.activate("gear");
 }
 
 /* 16px on a <select> in the phone layout is not a style choice: iOS Safari
@@ -262,97 +227,53 @@ function isNarrow(): boolean {
    rest of the session. Everything tappable is 34px+ for the same class of
    reason: the panel is only useful if a thumb can work it. */
 const CSS = `
-.gf-root {
-  position: fixed;
-  bottom: 12px;
-  left: 16px;
-  width: 330px;
-  z-index: 1000;
-  font-family: monospace;
-  font-size: 11px;
-  color: #ddd;
-  background: rgba(10, 10, 20, 0.92);
-  border: 1px solid #555;
-  border-radius: 4px;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  -webkit-user-select: none;
-  user-select: none;
-}
-.gf-title {
-  font-weight: bold;
-  color: #6fe3ff;
-  display: flex;
-  justify-content: space-between;
-  cursor: pointer;
-  padding: 2px 0;
-}
-.gf-body { display: flex; flex-direction: column; gap: 6px; }
-.gf-row { display: flex; align-items: center; gap: 6px; }
-.gf-label { width: 54px; flex: none; color: #999; }
+.gf-body { font-size: 12px; color: #ddd; }
+.gf-row { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.gf-label { width: 50px; flex: none; color: #999; }
 .gf-sel {
   flex: 1;
   min-width: 0;
+  height: 34px;
   background: #1a1a2e;
   color: #fff;
   border: 1px solid #555;
+  border-radius: 4px;
   font-family: monospace;
-  font-size: 11px;
+  /* 16px is not a style choice: iOS Safari zooms the page in when a focused
+     control's text is smaller, and never zooms back out — which would crop
+     the canvas for the rest of the session. */
+  font-size: 16px;
 }
-.gf-slider { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-.gf-slider input { flex: 1; min-width: 0; accent-color: #6fe3ff; }
-.gf-out { width: 42px; flex: none; text-align: right; color: #6fe3ff; }
+.gf-slider { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.gf-slider input { flex: 1; min-width: 0; height: 34px; accent-color: #6fe3ff; }
+.gf-out { width: 46px; flex: none; text-align: right; color: #6fe3ff; }
 .gf-nudge {
   flex: none;
-  width: 26px;
-  height: 26px;
+  width: 40px;
+  height: 34px;
   background: #1a1a2e;
   color: #cfcfe6;
   border: 1px solid #555;
   border-radius: 4px;
   font-family: monospace;
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   touch-action: manipulation;
 }
 .gf-out-box {
+  height: 34px;
   background: #11111c;
   color: #8fd98f;
   border: 1px solid #444;
   font-family: monospace;
-  font-size: 10px;
+  font-size: 12px;
   resize: vertical;
 }
 .gf-hint { color: #888; font-size: 10px; }
 
-/* Phone: a bottom sheet across the full width — which is also what buys the
-   sliders enough travel to be worth dragging at all. */
+/* Desktop has room for the label column and a hint line; a phone does not. */
 @media (max-width: 720px) {
-  .gf-root {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: auto;
-    border-radius: 10px 10px 0 0;
-    border-width: 1px 0 0 0;
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
-    /* Sized to sit inside the black band under a 16:9 canvas on a portrait
-       phone rather than climbing over the figure. Past that it scrolls. */
-    max-height: 46vh;
-    overflow-y: auto;
-    font-size: 13px;
-  }
-  .gf-title { font-size: 15px; padding: 6px 0; }
-  .gf-row { gap: 8px; min-height: 38px; }
-  .gf-label { width: 46px; font-size: 12px; }
-  .gf-sel { font-size: 16px; height: 34px; }
-  .gf-slider input { height: 34px; }
-  .gf-nudge { width: 40px; height: 34px; font-size: 18px; }
-  .gf-out { width: 46px; font-size: 13px; }
-  .gf-out-box { font-size: 12px; height: 34px; }
   .gf-hint { display: none; }
 }
 `;

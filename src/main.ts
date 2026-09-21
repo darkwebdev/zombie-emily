@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { WORLD } from "./config/tuning";
 import { GameScene } from "./scenes/GameScene";
 import { mountDemoPanel } from "./debug/DemoPanel";
+import { mountDebugDock } from "./debug/dock";
 import { mountGearFitPanel } from "./debug/GearFitPanel";
 import { mountTouchControls } from "./systems/touchControls";
 
@@ -42,6 +43,11 @@ const game = new Phaser.Game({
 mountTouchControls();
 
 if (debugMode) {
-  mountDemoPanel(game, "game");
-  mountGearFitPanel(game, "game");
+  // One drawer under the game holds every debug panel as a tab. It is a
+  // sibling of the canvas rather than an overlay, so opening a panel shrinks
+  // the picture instead of covering the figure being looked at — which is
+  // the difference between usable and useless on a phone.
+  const dock = mountDebugDock(game);
+  mountDemoPanel(game, "game", dock);
+  mountGearFitPanel(game, "game", dock);
 }

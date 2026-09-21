@@ -4,6 +4,7 @@ import { runAllTests, RunResult } from "./TestRunner";
 import { TESTS, Check, Checkpoint, TestCase } from "./tests";
 import type { GameScene } from "../scenes/GameScene";
 import { hitboxesEnabled, setHitboxes } from "./hitboxes";
+import type { DebugDock } from "./dock";
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -68,23 +69,25 @@ function whenSceneReady(game: Phaser.Game, sceneKey: string): Promise<boolean> {
  * specific state so a mechanic can be seen in isolation without manually
  * driving the game to reach it. Debug-only — only mounted when ?debug=1 is
  * present. */
-export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
+export function mountDemoPanel(game: Phaser.Game, sceneKey: string, dock: DebugDock): void {
   // Debug-only handle for driving the running game from a devtools console or
   // a CDP script. The project verifies behaviour in a live browser rather than
   // only through tsc, and without this there's no way to read the scene from
   // outside — Phaser keeps no global registry of game instances.
   (window as unknown as { __game?: Phaser.Game }).__game = game;
+  // A sibling of the canvas, above it in the flex column the dock sets up —
+  // not an overlay. Two lines of text is a cheap price in height, and it's
+  // the one piece of debug UI that has to be readable while looking at the
+  // scene it describes.
   const info = document.createElement("div");
   info.style.cssText = [
-    "position:fixed",
-    "top:0",
-    "left:0",
-    "right:0",
-    "padding:8px 12px",
+    "flex:none",
+    "width:100%",
+    "box-sizing:border-box",
+    "padding:6px 12px calc(6px + env(safe-area-inset-top, 0px))",
     "background:rgba(10,10,20,0.85)",
     "color:#fff",
     "font-family:monospace",
-    "z-index:1001",
     "border-bottom:1px solid #555",
   ].join(";");
 
@@ -94,50 +97,21 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
 
   const infoDesc = document.createElement("div");
   infoDesc.style.cssText = "font-size:11px;color:#ccc;margin-top:2px;";
-  infoDesc.textContent = "Pick a scenario from the panel on the right.";
+  infoDesc.textContent = "Pick a scenario from the Demos tab below.";
 
   info.appendChild(infoName);
   info.appendChild(infoDesc);
-  document.body.appendChild(info);
+  document.body.insertBefore(info, document.body.firstChild);
 
-  const panel = document.createElement("div");
-  panel.style.cssText = [
-    "position:fixed",
-    "top:64px",
-    "right:16px",
-    "display:flex",
-    "flex-direction:column",
-    "gap:6px",
-    "z-index:1000",
-    "font-family:monospace",
-    // The tree is taller than the viewport once a couple of branches are
-    // open, so the panel scrolls rather than running off the bottom.
-    "max-height:calc(100vh - 80px)",
-    "overflow-y:auto",
-    "width:190px",
-  ].join(";");
+  // The tree and the results list are tabs in the drawer under the game
+  // (debug/dock.ts), so neither is ever drawn over the scene it is about.
+  const panel = dock.addTab("demos", "Demos");
+  panel.style.gap = "6px";
 
-  const results = document.createElement("div");
-  results.style.cssText = [
-    "position:fixed",
-    "top:64px",
-    "left:16px",
-    "width:340px",
-    "max-height:80vh",
-    "overflow-y:auto",
-    "display:flex",
-    "flex-direction:column",
-    "gap:4px",
-    "z-index:1000",
-    "font-family:monospace",
-    "font-size:11px",
-    "background:rgba(10,10,20,0.85)",
-    "padding:10px",
-    "border-radius:4px",
-    "border:1px solid #555",
-  ].join(";");
-  results.hidden = true;
-  document.body.appendChild(results);
+  const results = dock.addTab("results", "Results", { attention: true });
+  results.style.fontSize = "11px";
+  results.style.gap = "4px";
+
 
   function appendCheckRow(c: Check, indent: boolean): void {
     const checkRow = document.createElement("div");
@@ -153,8 +127,10 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
    * "1/1 passed" summary or test-name row wrapping a single thing. */
   function renderRunResults(title: string, runResults: RunResult[]): void {
     console.table(runResults);
-    results.hidden = false;
     results.innerHTML = "";
+    // Results are worth switching to: whoever pressed the button is waiting
+    // for exactly this.
+    dock.activate("results");
 
     const header = document.createElement("div");
     header.style.cssText = "font-weight:bold;color:#6fe3ff;margin-bottom:4px;";
@@ -229,7 +205,8 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
     scene.runDemo(demo.name);
 
     const demoTests = TESTS.filter((t) => t.demo === demo.name);
-    results.hidden = false;
+    // Filled but not brought to the front: clicking a demo means you want to
+    // watch the demo. The rows are there in the Results tab when wanted.
     results.innerHTML = "";
     const header = document.createElement("div");
     header.style.cssText = "font-weight:bold;color:#6fe3ff;margin-bottom:4px;";
@@ -438,64 +415,6 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
     panel.appendChild(header);
     panel.appendChild(children);
   }
-
-  // The tree plus the info bar plus the results list covers a good third of
-  // the screen, which is exactly the third the game is drawn in. A toggle
-  // lets a scenario be watched unobstructed without dropping ?debug=1 (which
-  // would also take the deep-link, the tests and the hitbox overlay with it).
-  // State is remembered so it survives the scene.restart() every demo click
-  // triggers, and the reload a deep link performs.
-  const HIDE_KEY = "ze-panel-hidden";
-  const toggle = document.createElement("button");
-  toggle.style.cssText = [
-    "position:fixed",
-    "top:8px",
-    "right:16px",
-    "z-index:1002",
-    "padding:4px 10px",
-    "background:#1a1a2e",
-    "color:#cfcfe6",
-    "border:1px solid #555",
-    "border-radius:4px",
-    "cursor:pointer",
-    "font-size:11px",
-    "font-family:monospace",
-  ].join(";");
-
-  const setHidden = (hidden: boolean): void => {
-    panel.style.display = hidden ? "none" : "flex";
-    results.style.display = hidden ? "none" : "flex";
-    info.style.display = hidden ? "none" : "block";
-    toggle.textContent = hidden ? "▸ panel" : "▾ panel";
-    try {
-      localStorage.setItem(HIDE_KEY, hidden ? "1" : "0");
-    } catch {
-      // Private browsing and the like — the toggle still works for this
-      // page view, it just won't be remembered.
-    }
-  };
-
-  toggle.addEventListener("click", () => {
-    setHidden(panel.style.display !== "none");
-    toggle.blur();
-  });
-  document.body.appendChild(toggle);
-  document.body.appendChild(panel);
-
-  // Hidden by default on a phone, where the tree is most of the screen and
-  // the thing it was opened to look at is behind it. On a desktop it starts
-  // open as it always has; either way, an explicit choice is remembered.
-  let startHidden = window.matchMedia("(max-width: 720px)").matches;
-  try {
-    const stored = localStorage.getItem(HIDE_KEY);
-    if (stored !== null) startHidden = stored === "1";
-  } catch {
-    // Private browsing — fall back to the per-screen default.
-  }
-  setHidden(startHidden);
-  // `results` is hidden until a run produces rows; restoring the panel must
-  // not reveal an empty box.
-  if (!startHidden) results.style.display = results.hidden ? "none" : "flex";
 
   // Restore whatever the URL asks for. This is the other half of
   // writeSelectionToUrl: clicking a button puts the scenario in the URL, and
