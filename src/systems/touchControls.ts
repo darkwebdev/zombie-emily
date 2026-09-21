@@ -226,3 +226,12 @@ export function mountTouchControls(): void {
   root.append(left, right, restart);
   document.body.appendChild(root);
 }
+
+/** Hides the overlay without unmounting it. The art inspector uses this: on
+ * a phone the thumb clusters sit exactly where the figure being inspected
+ * is drawn, and there is nothing to drive while the simulation is frozen. */
+export function setTouchControlsVisible(visible: boolean): void {
+  const root = document.querySelector<HTMLElement>(".tc-root");
+  if (root) root.style.display = visible ? "flex" : "none";
+  if (!visible) touchInput.reset();
+}

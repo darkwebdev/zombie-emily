@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { WORLD, EMILY, EMILY_SPRITE, LIMB, COMBAT, AGGRO, FLANK, DEMO, FUSION, FLANK_FRONT_DEPTH, TRAIL_DEGENERATION_THRESHOLD } from "../config/tuning";
+import { WORLD, EMILY, EMILY_SPRITE, LIMB, COMBAT, AGGRO, FLANK, DEMO, FUSION, FLANK_FRONT_DEPTH, TRAIL_DEGENERATION_THRESHOLD, INSPECT } from "../config/tuning";
 import type { DemoName } from "../debug/demos";
 import type { EnemyKind, FollowerKind } from "../config/tuning";
 import { Emily } from "../entities/Emily";
@@ -13,8 +13,8 @@ import { AggroSystem } from "../systems/AggroSystem";
 import { GunfireSystem } from "../systems/GunfireSystem";
 import { ParallaxBackground } from "../systems/ParallaxBackground";
 import { Hud } from "../systems/Hud";
-import { pinToScreen, resetPins, getPinZoom, setPinZoom } from "../systems/screenPin";
-import { touchInput } from "../systems/touchControls";
+import { pinToScreen, resetPins, setPinZoom } from "../systems/screenPin";
+import { setTouchControlsVisible, touchInput } from "../systems/touchControls";
 import { SPAWNS } from "../levels/level1";
 import { applyHitboxes } from "../debug/hitboxes";
 import { CHARACTER_TEXTURE } from "../entities/characterArt";
@@ -93,6 +93,12 @@ export class GameScene extends Phaser.Scene {
   /** Debug-only animation preview state (the anim* demos), null in normal
    * play — see driveAnimPreview. */
   private animPreview: AnimPreview | null = null;
+  /** The gearFit demo freezes the whole simulation — see enterInspect. */
+  private inspecting = false;
+  /** Which figure the gearFit demo puts on screen. Set by the gear-fitting
+   * panel before it restarts the scene, so picking a kind there swaps the
+   * figure being inspected. Survives the restart: create() doesn't clear it. */
+  inspectKind: EnemyKind | FollowerKind = "STANDARD";
   private animPreviewOriginX = 0;
   private animPreviewDir: 1 | -1 = 1;
 
@@ -112,6 +118,7 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.animPreview = null;
+    this.inspecting = false;
     this.isGameOver = false;
     this.isCleared = false;
     // A direction still held (or an action queued) when the scene restarts
@@ -163,14 +170,15 @@ export class GameScene extends Phaser.Scene {
     // The canvas is WORLD.zoom times the world size (see main.ts); this is
     // what turns those extra pixels into magnification, so a screenful is
     // still WORLD.width x WORLD.height of world.
-    // getPinZoom() is WORLD.zoom in normal play; the debug art inspector can
-    // raise it, and it has to survive the restart each demo click performs.
-    this.cameras.main.setZoom(getPinZoom());
-    setPinZoom(getPinZoom());
-    // Every object the inspector hides is rebuilt by this create(), so the
-    // restart a demo click performs would otherwise bring the HUD back while
-    // the zoom it was hidden for is still in force.
-    this.setHudVisible(getPinZoom() <= WORLD.zoom);
+    //
+    // Reset rather than carried over: the art inspector raises this, and the
+    // pin zoom is module state that outlives a restart, so a scene that came
+    // back for any other reason (a demo click, R, a death) would otherwise
+    // open magnified into somebody's shoulder. The inspector re-raises it
+    // for itself in enterInspect.
+    this.cameras.main.setZoom(WORLD.zoom);
+    setPinZoom(WORLD.zoom);
+    this.setHudVisible(true);
     this.cameras.main.setBounds(0, 0, WORLD.levelWidth, WORLD.height);
     // lerpX 1 = no smoothing lag, Emily stays pinned to the horizontal center
     // every frame; lerpY 0 keeps the camera from ever panning vertically,
@@ -208,6 +216,15 @@ export class GameScene extends Phaser.Scene {
     // Drained even when unused, so a restart tap can't be banked and then
     // restart the run at some arbitrary later moment.
     touchInput.consumeRestart();
+
+    // The art inspector is a still life: nothing moves, nothing fights,
+    // nothing converts. Only the overlay sync runs, so dragging a slider in
+    // the gear panel still redraws the figure. (Without this the lone soldier
+    // would walk off after Emily, or stand there playing an aim cycle.)
+    if (this.inspecting) {
+      this.syncCharacterLayers();
+      return;
+    }
 
     this.handleFeed(dt);
     this.handleMovementAndThrow(dt);
@@ -327,6 +344,50 @@ export class GameScene extends Phaser.Scene {
     this.updateDebugLabels();
   }
 
+  /** The art inspector (the gearFit demo): one figure, alone in frame, frozen
+   * and filling the screen.
+   *
+   * Deliberately not a line-up. A roster demo answers "do these read as
+   * different characters at play scale"; fitting a helmet to a head answers
+   * "is this two pixels too low", and everything else on screen — the other
+   * kinds, Emily, the HUD, a soldier drifting toward the nearest zombie — is
+   * either in the way or moving the thing being measured.
+   *
+   * Emily is hidden rather than destroyed: the camera follows her and the
+   * breadcrumb trail is built around her, so removing her would take apart
+   * systems this demo only needs to stand still. Freezing the update loop
+   * (see `inspecting`) is what actually stops the scene, and the camera is
+   * unhooked from her and parked on the figure instead.
+   */
+  private enterInspect(): void {
+    const kind = this.inspectKind;
+    const figure =
+      kind === "BASE" || kind === "BRUTE"
+        ? (this.spawnFollowerNear(0, kind) as Phaser.GameObjects.Sprite)
+        : (this.spawnSoldierNear(0, kind, -1) as Phaser.GameObjects.Sprite);
+
+    this.emily.setVisible(false);
+    this.inspecting = true;
+
+    // Zoomed here rather than left to the panel, so the demo is the same
+    // thing whether it's reached by a button or by a ?demo=gearFit link —
+    // and solved from this figure's own height, so every kind arrives the
+    // same size on screen instead of the Brute overflowing the view a
+    // soldier fits in.
+    const canvasH = WORLD.height * WORLD.zoom;
+    const zoom = Math.min(INSPECT.maxZoom, (canvasH * INSPECT.fillFraction) / figure.displayHeight);
+    setPinZoom(zoom);
+    this.cameras.main.setZoom(zoom);
+
+    // Vertically centred on the figure's own middle rather than on the
+    // ground line: at inspection zoom the world view is shorter than the
+    // figure is tall, so centring on its feet would cut off its head.
+    const centreY = figure.y - ((1 - figure.originY) * figure.displayHeight) / 2;
+    this.cameras.main.stopFollow();
+    this.cameras.main.centerOn(figure.x, centreY);
+    this.setHudVisible(false);
+  }
+
   /** Hides everything drawn over the characters, for the debug art inspector.
    * Not just the HUD (see Hud.setVisible): at inspection zoom the per-figure
    * state labels are the worse offender — they are sized for the normal zoom,
@@ -337,6 +398,10 @@ export class GameScene extends Phaser.Scene {
     this.hud.setVisible(visible);
     this.feedBar.setVisible(visible);
     this.gunfire.setLaneVisible(visible);
+    // On a phone the thumb clusters are drawn straight over the figure, and
+    // there is nothing for them to drive while the inspector has the
+    // simulation stopped.
+    setTouchControlsVisible(visible);
     if (this.overlaysHidden) {
       this.debugLabels.forEach((t) => t.destroy());
       this.debugLabels = [];
@@ -1033,6 +1098,10 @@ export class GameScene extends Phaser.Scene {
         this.animPreviewDir = 1;
         break;
       }
+      case "gearFit": {
+        this.enterInspect();
+        break;
+      }
       case "artRoster": {
         // Spread wide enough that the wider figures (the Brute especially)
         // don't overlap — the point is to see each silhouette whole. They
@@ -1371,6 +1440,7 @@ export class GameScene extends Phaser.Scene {
       groundedLimbs: this.groundedLimbs,
       limbs: this.limbs,
       backgroundLayers: this.background.debugOffsets,
+      overlaysHidden: this.overlaysHidden,
       cameraWorldX: this.cameras.main.worldView.x,
     };
   }

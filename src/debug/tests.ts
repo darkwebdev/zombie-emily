@@ -392,6 +392,74 @@ export const TESTS: TestCase[] = [
     }),
   },
   {
+    demo: "gearFit",
+    name: "Gear-fitting bench: one figure, alone, frozen and in frame",
+    checkpoints: (() => {
+      // Frozen is the one claim here that can't be read off a single
+      // snapshot: a soldier that drifts one pixel a frame looks identical in
+      // a still. So the figure's position is captured once and compared to
+      // itself a third of a second later.
+      let at: { x: number; y: number } | null = null;
+      return [
+        {
+          afterMs: 160,
+          assert: (scene: GameScene) => {
+            const { soldiers, followers, emily } = scene.getTestSnapshot();
+            const roster = [...soldiers, ...followers];
+            at = roster[0] ? { x: roster[0].x, y: roster[0].y } : null;
+            return [
+              {
+                label: "Exactly one character on screen, and it's the inspected kind",
+                pass: roster.length === 1 && roster[0].kind === scene.inspectKind,
+                detail: `${roster.length} figure(s): ${roster.map((e) => e.kind).join(",") || "none"}`,
+              },
+              { label: "Emily is out of frame", pass: !emily.visible, detail: `visible=${emily.visible}` },
+            ];
+          },
+        },
+        {
+          afterMs: 320,
+          assert: (scene: GameScene) => {
+            const { soldiers, followers, overlaysHidden } = scene.getTestSnapshot();
+            const figure = [...soldiers, ...followers][0];
+            const cam = scene.cameras.main;
+            const view = cam.worldView;
+            const top = figure ? figure.y - figure.originY * figure.displayHeight : 0;
+            const bottom = figure ? top + figure.displayHeight : 0;
+            return [
+              {
+                label: "Nothing moved — the simulation is stopped",
+                pass: !!figure && !!at && Math.abs(figure.x - at.x) < 0.01 && Math.abs(figure.y - at.y) < 0.01,
+                detail: at && figure ? `${at.x.toFixed(2)},${at.y.toFixed(2)} -> ${figure.x.toFixed(2)},${figure.y.toFixed(2)}` : "no figure",
+              },
+              {
+                // Not a fixed number: the zoom is solved from the figure's
+                // own height (INSPECT in tuning.ts), so what's actually
+                // claimed is that it's well past play magnification.
+                label: "Zoomed well past play magnification",
+                pass: cam.zoom >= WORLD.zoom * 2,
+                detail: `zoom=${cam.zoom.toFixed(1)} play=${WORLD.zoom}`,
+              },
+              {
+                // The whole point of the zoom is to make the figure big; the
+                // whole risk of it is cutting its head off, since the view is
+                // shorter than the world is tall at this magnification.
+                label: "The figure is whole and centred in the view",
+                pass:
+                  !!figure &&
+                  top >= view.top &&
+                  bottom <= view.bottom &&
+                  Math.abs(figure.x - (view.x + view.width / 2)) < 1,
+                detail: `figure ${top.toFixed(1)}..${bottom.toFixed(1)} view ${view.top.toFixed(1)}..${view.bottom.toFixed(1)}`,
+              },
+              { label: "HUD, labels and aim lane hidden", pass: overlaysHidden, detail: `hidden=${overlaysHidden}` },
+            ];
+          },
+        },
+      ];
+    })(),
+  },
+  {
     demo: "artRoster",
     name: "Enemy/follower art: feet on the ground line, hitboxes untouched",
     checkpoints: single(20, (scene) => {

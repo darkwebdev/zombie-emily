@@ -31,6 +31,12 @@ export const DEMOS = [
       "Runtime-composited characters (#37). Three soldiers each carry a second image stacked over the body: one facing right, one flipped, and one paralyzed. Proves the overlay follows position and facing, mirrors with the flip, and takes the state tint — the modular art itself doesn't exist yet, so the layer is a generated placeholder band.",
   },
   {
+    name: "gearFit",
+    label: "Gear: Fit one",
+    description:
+      "One figure, alone in frame, frozen and filling the screen — the bench for fitting gear with the panel in the bottom-left (#37). Pick a kind there and it swaps the figure; drag dx/dy/scale and watch the piece land. Everything else is deliberately gone: no other characters, no Emily, no HUD, no state labels, and the simulation itself is stopped so nothing being measured can move.",
+  },
+  {
     name: "artRoster",
     label: "Art: Roster",
     description:
@@ -226,7 +232,7 @@ export type DemoName = (typeof DEMOS)[number]["name"];
 export const DEMO_GROUPS = [
   {
     label: "Animation",
-    demos: ["animIdle", "animWalk", "animThrow", "artRoster", "artLayers"],
+    demos: ["animIdle", "animWalk", "animThrow", "artRoster", "artLayers", "gearFit"],
   },
   {
     label: "Core loop",

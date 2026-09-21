@@ -7,6 +7,21 @@ export const WORLD = {
   groundY: 150,
 };
 
+/** The art inspector (the gearFit demo). Debug-only — nothing on the play
+ * path reads any of this.
+ *
+ * The zoom is solved per figure rather than fixed, because the roster is not
+ * one size: a Brute is half again as tall as a soldier, and the one zoom that
+ * makes a soldier screen-high cuts the Brute's feet off. So each figure is
+ * scaled to fill `fillFraction` of the screen, capped at `maxZoom` in case a
+ * future kind is tiny. Worth the solve: gear is fitted a pixel at a time, and
+ * a pixel at play scale is a third of a screen pixel. */
+export const INSPECT = {
+  fillFraction: 0.82,
+  /** Also the top of the gear-fitting panel's zoom slider. */
+  maxZoom: WORLD.zoom * 5,
+};
+
 /** The y everything stands on: Emily's y is her centre, and her body is
  * EMILY_SPRITE.bodyHeight (28) tall, so her feet are 14 below it. */
 export const GROUND_LINE = WORLD.groundY + 14;

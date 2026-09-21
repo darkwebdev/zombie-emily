@@ -482,11 +482,15 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
   document.body.appendChild(toggle);
   document.body.appendChild(panel);
 
-  let startHidden = false;
+  // Hidden by default on a phone, where the tree is most of the screen and
+  // the thing it was opened to look at is behind it. On a desktop it starts
+  // open as it always has; either way, an explicit choice is remembered.
+  let startHidden = window.matchMedia("(max-width: 720px)").matches;
   try {
-    startHidden = localStorage.getItem(HIDE_KEY) === "1";
+    const stored = localStorage.getItem(HIDE_KEY);
+    if (stored !== null) startHidden = stored === "1";
   } catch {
-    startHidden = false;
+    // Private browsing — fall back to the per-screen default.
   }
   setHidden(startHidden);
   // `results` is hidden until a run produces rows; restoring the panel must
