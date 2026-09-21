@@ -34,7 +34,7 @@ export const DEMOS = [
     name: "gearFit",
     label: "Gear: Fit one",
     description:
-      "One figure, alone in frame, frozen and filling the screen — the bench for fitting gear with the panel in the bottom-left (#37). Pick a kind there and it swaps the figure; drag dx/dy/scale and watch the piece land. Everything else is deliberately gone: no other characters, no Emily, no HUD, no state labels, and the simulation itself is stopped so nothing being measured can move.",
+      "One figure, alone in frame, frozen and filling the screen — the bench for fitting gear with the Gear tab below (#37). Pick a kind there and it swaps the figure; drag dx/dy/scale, or tap ±, and watch the piece land. Everything else is deliberately gone: no other characters, no Emily, no HUD, no state labels, no touch controls, and the simulation itself is stopped so nothing being measured can move.",
   },
   {
     name: "artRoster",
