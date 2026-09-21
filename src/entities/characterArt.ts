@@ -20,6 +20,8 @@ import rifleSniperUrl from "../assets/rifle-sniper.png";
 import shieldRiotUrl from "../assets/shield-riot.png";
 import infectedTorsoUrl from "../assets/infected-torso-torn.png";
 import infectedLegsUrl from "../assets/infected-legs.png";
+import armsSleevesUrl from "../assets/arms-sleeves.png";
+import infectedArmsUrl from "../assets/infected-arms.png";
 
 /** Texture key per character kind — the *base* layer, which is the texture the
  * entity sprite itself carries and the one `applyCharacterArt` sizes and seats
@@ -49,6 +51,8 @@ const URLS: Record<string, string> = {
   "shield-riot": shieldRiotUrl,
   "infected-torso-torn": infectedTorsoUrl,
   "infected-legs": infectedLegsUrl,
+  "arms-sleeves": armsSleevesUrl,
+  "infected-arms": infectedArmsUrl,
 };
 
 /** Call from the scene's preload(). One call covers every enemy and follower

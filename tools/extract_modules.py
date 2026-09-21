@@ -34,6 +34,28 @@ from pathlib import Path
 from PIL import Image
 
 BOARD = Path("art/modules-board.png")
+# The layering board has no ARMS column at all — its categories run helmets,
+# vests, chest/shoulder armor, pants, boots, backpacks, weapons, shields,
+# accessories, and every torso piece is sleeveless. The earlier board does
+# have one, drawn as a proper armoured sleeve with shoulder pad, forearm and
+# glove, so the arms are cut from there instead.
+#
+# Its figures are drawn at a different size (a 346px base against this
+# board's 210px), which used to make mixing boards impractical. It no longer
+# matters: layers are positioned and scaled at runtime from CHARACTER_LAYERS,
+# so each source only has to be internally consistent, and the fitting panel
+# reconciles the rest.
+ARMS_BOARD = Path("art/modules-prev-board.png")
+ARMS_BG = (13, 10, 26)
+ARMS_BASE_HEIGHT = 426 - 80  # that board's own base figure, for one shared scale
+
+ARMS_COMPONENTS = {
+    # Both arms are cut as one image — they are drawn as a separated left and
+    # right pair, and a single sleeve layer composites far more simply than
+    # two mirrored halves that would each need their own anchor.
+    "arms-sleeves": (548, 98, 632, 183),
+    "infected-arms": (548, 601, 632, 686),
+}
 OUT_DIR = Path("src/assets")
 
 # Board background, and how far a pixel may stray from it and still count as
@@ -155,6 +177,24 @@ def cut(board: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
     return cell
 
 
+def cut_arms() -> None:
+    """Arms come from the other board (see ARMS_BOARD), so they need its own
+    background colour and its own scale reference."""
+    global BG
+    board = Image.open(ARMS_BOARD).convert("RGB")
+    saved, BG = BG, ARMS_BG
+    try:
+        scale = TARGET_HEIGHT / ARMS_BASE_HEIGHT
+        for name, box in ARMS_COMPONENTS.items():
+            part = cut(board, box)
+            pw = max(1, round(part.width * scale))
+            ph = max(1, round(part.height * scale))
+            part.resize((pw, ph), Image.NEAREST).save(OUT_DIR / f"{name}.png")
+            print(f"{name}.png  {pw}x{ph}  (from {ARMS_BOARD.name})")
+    finally:
+        BG = saved
+
+
 def main() -> None:
     board = Image.open(BOARD).convert("RGB")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -190,3 +230,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    cut_arms()

@@ -63,6 +63,7 @@ export const CHARACTER_LAYERS: Record<EnemyKind | FollowerKind, CharacterLayer[]
   STANDARD: [
     { texture: "human-base" },
     { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
+    { texture: "arms-sleeves", anchor: "chest", dy: 6, scale: 1.5 },
     { texture: "torso-vest", anchor: "chest", scale: 1.2 },
     { texture: "head-helmet", anchor: "head", dy: -2, scale: 1.05 },
     { texture: "rifle-assault", anchor: "hand", scale: 0.9 },
@@ -70,6 +71,7 @@ export const CHARACTER_LAYERS: Record<EnemyKind | FollowerKind, CharacterLayer[]
   RIFLEMAN: [
     { texture: "human-base" },
     { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
+    { texture: "arms-sleeves", anchor: "chest", dy: 6, scale: 1.5 },
     { texture: "torso-vest", anchor: "chest", scale: 1.2 },
     { texture: "head-hood", anchor: "head", dy: -2, scale: 1.05 },
     { texture: "rifle-sniper", anchor: "hand", scale: 0.9 },
@@ -77,6 +79,7 @@ export const CHARACTER_LAYERS: Record<EnemyKind | FollowerKind, CharacterLayer[]
   SHIELD: [
     { texture: "human-base" },
     { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
+    { texture: "arms-sleeves", anchor: "chest", dy: 6, scale: 1.5 },
     { texture: "torso-vest", anchor: "chest", scale: 1.2 },
     { texture: "head-helmet", anchor: "head", dy: -2, scale: 1.05 },
     { texture: "shield-riot", anchor: "chest", dx: -9, scale: 1.2 },
@@ -87,6 +90,7 @@ export const CHARACTER_LAYERS: Record<EnemyKind | FollowerKind, CharacterLayer[]
   BASE: [
     { texture: "infected-base" },
     { texture: "infected-legs", anchor: "hips", dy: 4, scale: 1.45 },
+    { texture: "infected-arms", anchor: "chest", dy: 6, scale: 1.5 },
     { texture: "infected-torso-torn", anchor: "chest", scale: 1.2 },
   ],
   // Still one finished figure: the boards carry no brute components, and its

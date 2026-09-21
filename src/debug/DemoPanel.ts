@@ -439,7 +439,59 @@ export function mountDemoPanel(game: Phaser.Game, sceneKey: string): void {
     panel.appendChild(children);
   }
 
+  // The tree plus the info bar plus the results list covers a good third of
+  // the screen, which is exactly the third the game is drawn in. A toggle
+  // lets a scenario be watched unobstructed without dropping ?debug=1 (which
+  // would also take the deep-link, the tests and the hitbox overlay with it).
+  // State is remembered so it survives the scene.restart() every demo click
+  // triggers, and the reload a deep link performs.
+  const HIDE_KEY = "ze-panel-hidden";
+  const toggle = document.createElement("button");
+  toggle.style.cssText = [
+    "position:fixed",
+    "top:8px",
+    "right:16px",
+    "z-index:1002",
+    "padding:4px 10px",
+    "background:#1a1a2e",
+    "color:#cfcfe6",
+    "border:1px solid #555",
+    "border-radius:4px",
+    "cursor:pointer",
+    "font-size:11px",
+    "font-family:monospace",
+  ].join(";");
+
+  const setHidden = (hidden: boolean): void => {
+    panel.style.display = hidden ? "none" : "flex";
+    results.style.display = hidden ? "none" : "flex";
+    info.style.display = hidden ? "none" : "block";
+    toggle.textContent = hidden ? "▸ panel" : "▾ panel";
+    try {
+      localStorage.setItem(HIDE_KEY, hidden ? "1" : "0");
+    } catch {
+      // Private browsing and the like — the toggle still works for this
+      // page view, it just won't be remembered.
+    }
+  };
+
+  toggle.addEventListener("click", () => {
+    setHidden(panel.style.display !== "none");
+    toggle.blur();
+  });
+  document.body.appendChild(toggle);
   document.body.appendChild(panel);
+
+  let startHidden = false;
+  try {
+    startHidden = localStorage.getItem(HIDE_KEY) === "1";
+  } catch {
+    startHidden = false;
+  }
+  setHidden(startHidden);
+  // `results` is hidden until a run produces rows; restoring the panel must
+  // not reveal an empty box.
+  if (!startHidden) results.style.display = results.hidden ? "none" : "flex";
 
   // Restore whatever the URL asks for. This is the other half of
   // writeSelectionToUrl: clicking a button puts the scenario in the URL, and
