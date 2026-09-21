@@ -13,7 +13,7 @@ import { AggroSystem } from "../systems/AggroSystem";
 import { GunfireSystem } from "../systems/GunfireSystem";
 import { ParallaxBackground } from "../systems/ParallaxBackground";
 import { Hud } from "../systems/Hud";
-import { pinToScreen } from "../systems/screenPin";
+import { pinToScreen, resetPins, getPinZoom, setPinZoom } from "../systems/screenPin";
 import { touchInput } from "../systems/touchControls";
 import { SPAWNS } from "../levels/level1";
 import { applyHitboxes } from "../debug/hitboxes";
@@ -83,6 +83,9 @@ export class GameScene extends Phaser.Scene {
 
   private debugMode = false;
   private debugLabels: Phaser.GameObjects.Text[] = [];
+  /** Art-inspector mode: everything drawn *over* the characters is suppressed
+   * so the figures themselves can be judged. See setHudVisible. */
+  private overlaysHidden = false;
   /** Set by runDemo() just before a restart; applied once the fresh scene's
    * create() has finished setting up, so every demo starts from a clean
    * slate instead of stacking on top of leftover state. */
@@ -114,6 +117,9 @@ export class GameScene extends Phaser.Scene {
     // A direction still held (or an action queued) when the scene restarts
     // would otherwise carry into the fresh run.
     touchInput.reset();
+    // A restart destroys every pinned object, so the registry starts empty —
+    // otherwise it would grow by a whole HUD and backdrop on each demo click.
+    resetPins();
     this.debugMode = new URLSearchParams(location.search).has("debug");
     this.ammo = LIMB.ammoMax;
     this.followerSpawnSeq = 0;
@@ -157,7 +163,14 @@ export class GameScene extends Phaser.Scene {
     // The canvas is WORLD.zoom times the world size (see main.ts); this is
     // what turns those extra pixels into magnification, so a screenful is
     // still WORLD.width x WORLD.height of world.
-    this.cameras.main.setZoom(WORLD.zoom);
+    // getPinZoom() is WORLD.zoom in normal play; the debug art inspector can
+    // raise it, and it has to survive the restart each demo click performs.
+    this.cameras.main.setZoom(getPinZoom());
+    setPinZoom(getPinZoom());
+    // Every object the inspector hides is rebuilt by this create(), so the
+    // restart a demo click performs would otherwise bring the HUD back while
+    // the zoom it was hidden for is still in force.
+    this.setHudVisible(getPinZoom() <= WORLD.zoom);
     this.cameras.main.setBounds(0, 0, WORLD.levelWidth, WORLD.height);
     // lerpX 1 = no smoothing lag, Emily stays pinned to the horizontal center
     // every frame; lerpY 0 keeps the camera from ever panning vertically,
@@ -314,6 +327,22 @@ export class GameScene extends Phaser.Scene {
     this.updateDebugLabels();
   }
 
+  /** Hides everything drawn over the characters, for the debug art inspector.
+   * Not just the HUD (see Hud.setVisible): at inspection zoom the per-figure
+   * state labels are the worse offender — they are sized for the normal zoom,
+   * so magnified they overlap into one illegible band across the heads — and
+   * the Rifleman's aim lane paints a stripe through everyone's waist. */
+  setHudVisible(visible: boolean): void {
+    this.overlaysHidden = !visible;
+    this.hud.setVisible(visible);
+    this.feedBar.setVisible(visible);
+    this.gunfire.setLaneVisible(visible);
+    if (this.overlaysHidden) {
+      this.debugLabels.forEach((t) => t.destroy());
+      this.debugLabels = [];
+    }
+  }
+
   /** Rebuilds every character's overlay stack from the current manifest.
    * Used by the gear-fitting panel, which edits CHARACTER_LAYERS in place and
    * needs the change on screen immediately rather than on the next spawn. */
@@ -335,7 +364,7 @@ export class GameScene extends Phaser.Scene {
    * so a cluster un-stacks back to its natural Y the instant its members
    * spread back out. */
   private updateDebugLabels(): void {
-    if (!this.debugMode) return;
+    if (!this.debugMode || this.overlaysHidden) return;
     this.debugLabels.forEach((t) => t.destroy());
     this.debugLabels = [];
 

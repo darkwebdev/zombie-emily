@@ -20,6 +20,16 @@ export class Hud {
   private ammoText: Phaser.GameObjects.Text;
   private pulseT = 0;
 
+  /** Screen-pinned elements keep their position across a zoom change but not
+   * their size, so at inspection zoom the HUD is drawn several times over and
+   * covers the characters being looked at. The art inspector hides it. */
+  setVisible(visible: boolean): void {
+    this.gfx.setVisible(visible);
+    this.hordeText.setVisible(visible);
+    this.hpText.setVisible(visible);
+    this.ammoText.setVisible(visible);
+  }
+
   constructor(scene: Phaser.Scene) {
     this.gfx = pinToScreen(scene.add.graphics()).setDepth(1000);
     this.hordeText = pinToScreen(

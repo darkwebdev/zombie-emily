@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import { ANCHORS, AnchorName, CHARACTER_LAYERS, CharacterLayer } from "../entities/characterLayers";
 import type { EnemyKind, FollowerKind } from "../config/tuning";
 import type { GameScene } from "../scenes/GameScene";
+import { WORLD } from "../config/tuning";
+import { getPinZoom, setPinZoom } from "../systems/screenPin";
 
 type Kind = EnemyKind | FollowerKind;
 
@@ -97,6 +99,28 @@ export function mountGearFitPanel(game: Phaser.Game, sceneKey: string): void {
   const dy = mkSlider(-60, 60, 0.5);
   const sc = mkSlider(0.2, 3, 0.05);
 
+  // Camera zoom. Gear is fitted a pixel at a time on a 114px-tall figure, and
+  // at the default zoom that figure is a thumbnail — this makes it big enough
+  // to actually judge. Pinned elements (HUD, parallax) are re-seated with it,
+  // because Phaser zooms about the camera centre and moving one without the
+  // other slides the whole backdrop off.
+  const zoom = mkSlider(WORLD.zoom, WORLD.zoom * 4, 0.5);
+  zoom.input.value = String(getPinZoom());
+  const applyZoom = (): void => {
+    const z = Number(zoom.input.value);
+    zoom.out.textContent = `${z.toFixed(1)}x`;
+    setPinZoom(z);
+    const s = scene();
+    if (s?.sys?.isActive()) {
+      s.cameras.main.setZoom(z);
+      // Pinned UI keeps its position through a zoom but not its size, so the
+      // HUD balloons over the very characters being inspected. Hide it above
+      // the normal zoom and restore it on the way back down.
+      s.setHudVisible?.(z <= WORLD.zoom);
+    }
+  };
+  zoom.input.addEventListener("input", applyZoom);
+
   const out = document.createElement("textarea");
   out.readOnly = true;
   out.rows = 4;
@@ -114,6 +138,7 @@ export function mountGearFitPanel(game: Phaser.Game, sceneKey: string): void {
     row("dx", dx.wrap),
     row("dy", dy.wrap),
     row("scale", sc.wrap),
+    row("zoom", zoom.wrap),
     out,
     hint,
   );
@@ -178,4 +203,5 @@ export function mountGearFitPanel(game: Phaser.Game, sceneKey: string): void {
   layerSel.addEventListener("change", loadSelected);
   kindSel.addEventListener("change", refreshLayerList);
   refreshLayerList();
+  applyZoom();
 }

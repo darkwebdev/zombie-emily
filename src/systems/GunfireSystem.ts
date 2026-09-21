@@ -30,6 +30,12 @@ export class GunfireSystem {
     this.laneGfx = scene.add.graphics().setDepth(850);
   }
 
+  /** The aim lane is a full-width telegraph, so at the art inspector's zoom
+   * it is a coloured band straight across the figures being looked at. */
+  setLaneVisible(visible: boolean): void {
+    this.laneGfx.setVisible(visible);
+  }
+
   update(soldiers: Soldier[], emily: Emily, followers: Follower[]): GunfireResult {
     const followerKilled: Follower[] = [];
 
