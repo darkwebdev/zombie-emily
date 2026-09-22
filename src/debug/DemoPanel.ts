@@ -52,11 +52,24 @@ function writeSelectionToUrl(key: typeof URL_DEMO | typeof URL_TESTS, value: str
  *   tab is eventually looked at. */
 function whenSceneReady(game: Phaser.Game, sceneKey: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const deadline = Date.now() + 10_000;
+    // The clock only runs while the page is visible. Phaser boots off
+    // requestAnimationFrame, which a background tab throttles to nothing, so
+    // a wall-clock deadline expires against a scene that was never given a
+    // chance to start — and these links are routinely opened in a background
+    // tab, straight from a GitHub issue. Waiting only counts against the
+    // budget while the page is actually being rendered.
+    let spent = 0;
+    let last = Date.now();
     const check = (): void => {
       const scene = game.scene.getScene(sceneKey);
-      if (scene?.sys.isActive()) resolve(true);
-      else if (Date.now() > deadline) resolve(false);
+      if (scene?.sys.isActive()) {
+        resolve(true);
+        return;
+      }
+      const now = Date.now();
+      if (!document.hidden) spent += now - last;
+      last = now;
+      if (spent > 10_000) resolve(false);
       else setTimeout(check, 16);
     };
     check();
