@@ -8,20 +8,19 @@ import riflemanUrl from "../assets/enemy-rifleman.png";
 import baseUrl from "../assets/follower-base.png";
 import bruteUrl from "../assets/follower-brute.png";
 
-// Modular layer set, cut from art/modules-board.png by tools/extract_modules.py.
+// Modular layer set, cut from art/modules-prev-board.png by
+// tools/extract_modules.py — see its docstring for why that board and not the
+// other one. The bases are fully clothed, so the pieces here are the few
+// things worn on top: a hood, weapons, a shield, two belt items.
 import humanBaseUrl from "../assets/human-base.png";
 import infectedBaseUrl from "../assets/infected-base.png";
-import headHelmetUrl from "../assets/head-helmet.png";
 import headHoodUrl from "../assets/head-hood.png";
-import torsoVestUrl from "../assets/torso-vest.png";
-import legsPantsUrl from "../assets/legs-pants.png";
 import rifleAssaultUrl from "../assets/rifle-assault.png";
 import rifleSniperUrl from "../assets/rifle-sniper.png";
 import shieldRiotUrl from "../assets/shield-riot.png";
-import infectedTorsoUrl from "../assets/infected-torso-torn.png";
-import infectedLegsUrl from "../assets/infected-legs.png";
-import armsSleevesUrl from "../assets/arms-sleeves.png";
-import infectedArmsUrl from "../assets/infected-arms.png";
+import pistolUrl from "../assets/pistol.png";
+import accGrenadeUrl from "../assets/acc-grenade.png";
+import accMedkitUrl from "../assets/acc-medkit.png";
 
 /** Texture key per character kind — the *base* layer, which is the texture the
  * entity sprite itself carries and the one `applyCharacterArt` sizes and seats
@@ -42,17 +41,13 @@ const URLS: Record<string, string> = {
   "follower-brute": bruteUrl,
   "human-base": humanBaseUrl,
   "infected-base": infectedBaseUrl,
-  "head-helmet": headHelmetUrl,
   "head-hood": headHoodUrl,
-  "torso-vest": torsoVestUrl,
-  "legs-pants": legsPantsUrl,
   "rifle-assault": rifleAssaultUrl,
   "rifle-sniper": rifleSniperUrl,
   "shield-riot": shieldRiotUrl,
-  "infected-torso-torn": infectedTorsoUrl,
-  "infected-legs": infectedLegsUrl,
-  "arms-sleeves": armsSleevesUrl,
-  "infected-arms": infectedArmsUrl,
+  pistol: pistolUrl,
+  "acc-grenade": accGrenadeUrl,
+  "acc-medkit": accMedkitUrl,
 };
 
 /** Call from the scene's preload(). One call covers every enemy and follower

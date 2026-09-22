@@ -1,29 +1,45 @@
 #!/usr/bin/env python3
-"""Cuts the modular character components out of art/modules-board.png.
+"""Cuts the modular character components out of art/modules-prev-board.png.
 
-Two boards exist and only this one supports layering. art/modules-prev-board.png
-draws its "BASE BODY" already wearing a helmet, vest and knee pads — a finished
-soldier, so stacking gear on it just smears armour over armour. This board's
-base is captioned "MINIMAL CLOTHING" (tank top and shorts) and is the one
-intended to be built on; it even prints the intended stacks in its LAYERING
-EXAMPLES row.
+WHICH BOARD, AND WHY IT CHANGED
+-------------------------------
+There are two boards and this script used to read the other one,
+art/modules-board.png, whose base body is captioned "MINIMAL CLOTHING" — a
+tank top and shorts, meant to be dressed from the catalogue printed beside it.
+That decomposition was abandoned: dressing a near-naked body means every layer
+is a body part that has to seam against its neighbours, and getting trousers
+to cover shins without swallowing boots cost three rounds of hand-fitting on
+its own. It also can't finish the job — that board has no arms column at all,
+so every soldier read as a man in a tank top wearing a vest.
 
-What neither board gives is alignment. The base is a whole figure while every
-component is a small item floating in its own labelled cell, with no anchor
-relating the two. Cutting them is easy; knowing where each sits on the body is
-the actual work, and it has to be hand-tuned.
+This board's base is instead a **fully clothed soldier**, and the pieces that
+layer over it are small additions at known places: a hood, a weapon, a shield,
+a belt item. Nothing has to seam, nothing can leave a gap, and the only things
+still needing a fitted offset are the few pieces actually worn on top. That is
+the whole reason the source moved.
 
-So each component carries a hand-tuned placement in PLACEMENT below, expressed
-as fractions of the emitted canvas, and is pasted onto a full-figure canvas at
-that spot. That is what makes the output satisfy the layer contract the game
-requires (see src/entities/characterLayers.ts): every layer is the same canvas
-size as its base with the figure's feet on the bottom row, because
-applyCharacterArt solves originY from each texture's own height. A tight crop
-straight off the board would seat itself somewhere else entirely and the
-character would float.
+Two consequences of the base being dressed, both deliberate:
 
-Everything is scaled by one factor, chosen so the base body lands on the same
-114px height Emily and the existing enemies use (tools/extract_enemies.py),
+- **The base already wears a helmet with goggles**, so STANDARD and SHIELD
+  need no head layer at all — they are the base as drawn. Only RIFLEMAN
+  replaces the head, with the hooded jacket that the board's own SNIPER
+  example variant uses.
+- **The infected keep their own base**, cut from this board's lower half, not
+  derived from the human one. They take soldier *accessories* (the grenade and
+  medkit from the EXTRA column) over that base — which is also why the
+  accessory cuts are emitted once and used by both sides.
+
+THE LAYER CONTRACT
+------------------
+Bases are emitted full-figure with the feet on the bottom row, because
+applyCharacterArt solves originY from each texture's own height (see
+src/entities/characterArt.ts). Gear is emitted **tight-cropped**: where each
+piece sits and how big it is are runtime data now (anchor/dx/dy/scale in
+CHARACTER_LAYERS, dragged in the gear-fitting panel — ?debug=1, Gear tab),
+so baking a guess into the PNG would only freeze it.
+
+Everything is scaled by its own base's factor, chosen so each base lands on
+the 114px height Emily and the existing enemies use (tools/extract_enemies.py),
 which is what keeps a modular soldier the right size next to everyone else.
 
 Usage:  python3 tools/extract_modules.py
@@ -33,101 +49,41 @@ from pathlib import Path
 
 from PIL import Image
 
-BOARD = Path("art/modules-board.png")
-# The layering board has no ARMS column at all — its categories run helmets,
-# vests, chest/shoulder armor, pants, boots, backpacks, weapons, shields,
-# accessories, and every torso piece is sleeveless. The earlier board does
-# have one, drawn as a proper armoured sleeve with shoulder pad, forearm and
-# glove, so the arms are cut from there instead.
-#
-# Its figures are drawn at a different size (a 346px base against this
-# board's 210px), which used to make mixing boards impractical. It no longer
-# matters: layers are positioned and scaled at runtime from CHARACTER_LAYERS,
-# so each source only has to be internally consistent, and the fitting panel
-# reconciles the rest.
-ARMS_BOARD = Path("art/modules-prev-board.png")
-ARMS_BG = (13, 10, 26)
-ARMS_BASE_HEIGHT = 426 - 80  # that board's own base figure, for one shared scale
-
-ARMS_COMPONENTS = {
-    # Both arms are cut as one image — they are drawn as a separated left and
-    # right pair, and a single sleeve layer composites far more simply than
-    # two mirrored halves that would each need their own anchor.
-    "arms-sleeves": (548, 98, 632, 183),
-    "infected-arms": (548, 601, 632, 686),
-}
+BOARD = Path("art/modules-prev-board.png")
 OUT_DIR = Path("src/assets")
 
 # Board background, and how far a pixel may stray from it and still count as
 # background (summed per-channel difference).
-BG = (4, 8, 22)
+BG = (13, 10, 26)
 BG_TOL = 45
 
 # Matches GRID_CHAR_HEIGHT in extract_sprites.py and HUMAN_HEIGHT in
 # extract_enemies.py — one shared scale across every character in the game.
 TARGET_HEIGHT = 114
 
-# Source boxes on the board, found by scanning for content bands. Left/top/
-# right/bottom, and deliberately stopping short of each figure's caption. The
-# board prints "BASE BODY" and "(MINIMAL CLOTHING)" a few px under the feet,
-# and a box that reaches them doesn't just paste type onto the sprite — it
-# makes the caption the bottom row, so applyCharacterArt seats the character
-# by its label and the figure floats above the ground line. The bounds below
-# are the figures' own content runs (human 77-286, infected 407-625), found
-# with a per-pixel scan; a coarser threshold silently merged figure and
-# caption into one run, which is how this went wrong the first time.
-HUMAN_BASE_BOX = (28, 77, 114, 287)
-INFECTED_BASE_BOX = (28, 407, 114, 626)
+# Left/top/right/bottom on the board, found by scanning for content bands and
+# then narrowed per item. The boxes stop short of every printed caption: the
+# board labels each column, and a box that reaches a caption doesn't merely
+# paste type onto the sprite — for a base it makes the caption the bottom row,
+# so applyCharacterArt seats the figure by its label and it floats above the
+# ground line.
+HUMAN_BASE_BOX = (41, 80, 174, 427)
+INFECTED_BASE_BOX = (42, 581, 170, 906)
 
-COMPONENTS = {
-    # name:           (box,                     placement key)
-    "head-helmet": ((161, 84, 207, 123), "head"),
-    "head-hood": ((161, 133, 207, 175), "head"),
-    "torso-vest": ((244, 85, 289, 132), "torso"),
-    # Row 2 of PANTS/LEG ARMOR, not row 1: row 1 is knee-length shorts with
-    # pads, which over a base body already in shorts just reads as bare shins
-    # in kneepads. Row 2 is the full-length trouser.
-    "legs-pants": ((514, 156, 565, 229), "legs"),
-    "rifle-assault": ((869, 106, 972, 140), "weapon"),
-    "rifle-sniper": ((869, 181, 972, 213), "weapon"),
-    "shield-riot": ((1011, 83, 1055, 146), "shield"),
-}
-
-INFECTED_COMPONENTS = {
-    # The infected's ragged gear is in CHEST/SHOULDER ARMOR, not the VESTS
-    # column — the latter holds the same intact plate carriers the humans wear.
-    "infected-torso-torn": ((390, 605, 432, 655), "torso"),
-    # Row 3, not row 2: row 2 of the infected pants column is a pair of bare
-    # gored legs rather than a garment, which composites as a dark blob.
-    "infected-legs": ((514, 585, 565, 655), "legs"),
-}
-
-# Retained only as the starting values now seeded into CHARACTER_LAYERS —
-# positioning itself happens at runtime, so nothing here is baked into a PNG.
-#
-# Where each component sits on the body, and how big it has to be.
-#
-# cx is its centre and ty its top edge, both as fractions of the canvas. `scale`
-# multiplies the shared base scale, and it is not optional padding: the board's
-# cells are roughly uniform in size regardless of what body part they hold, so
-# they are icons rather than body-proportioned layers. A helmet icon (46x39) is
-# about right for a head on a 210px body, but a trouser icon (51x73) is ~25%
-# short of the ~95px those legs need. Without a per-part scale the trousers
-# render as knee pads and the shins stay bare.
-#
-# All of these are hand-tuned against the board's own assembled examples —
-# nothing here can be derived, because the cells carry no anchor and no
-# indication of intended size.
-PLACEMENT = {
-    "head": {"cx": 0.50, "ty": 0.00, "scale": 1.0},
-    "torso": {"cx": 0.50, "ty": 0.21, "scale": 1.15},
-    # Waist to boot-top: the tallest run on the figure, and the one the
-    # icon-sized source art falls shortest of.
-    "legs": {"cx": 0.50, "ty": 0.42, "scale": 1.45},
-    # Held out to the figure's right, at chest height.
-    "weapon": {"cx": 0.62, "ty": 0.33, "scale": 1.0},
-    # Carried on the left arm, covering most of the torso.
-    "shield": {"cx": 0.30, "ty": 0.26, "scale": 1.15},
+# Gear, all from the human half of the board. The infected share it (see the
+# docstring): a soldier's grenade on a walking corpse is the point.
+GEAR = {
+    # The board's SNIPER variant is the base body in this hooded jacket, which
+    # is why RIFLEMAN is the one kind that gets a head layer.
+    "head-hood": (398, 317, 472, 402),
+    "rifle-assault": (838, 121, 982, 170),
+    "rifle-sniper": (839, 202, 983, 242),
+    "pistol": (915, 352, 956, 385),
+    "shield-riot": (915, 398, 973, 494),
+    # First of each row in the EXTRA column; the rest are near-duplicates at
+    # this size, and a belt item is ~4 world pixels tall.
+    "acc-grenade": (1018, 242, 1040, 274),
+    "acc-medkit": (1018, 293, 1045, 329),
 }
 
 
@@ -177,57 +133,32 @@ def cut(board: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
     return cell
 
 
-def cut_arms() -> None:
-    """Arms come from the other board (see ARMS_BOARD), so they need its own
-    background colour and its own scale reference."""
-    global BG
-    board = Image.open(ARMS_BOARD).convert("RGB")
-    saved, BG = BG, ARMS_BG
-    try:
-        scale = TARGET_HEIGHT / ARMS_BASE_HEIGHT
-        for name, box in ARMS_COMPONENTS.items():
-            part = cut(board, box)
-            pw = max(1, round(part.width * scale))
-            ph = max(1, round(part.height * scale))
-            part.resize((pw, ph), Image.NEAREST).save(OUT_DIR / f"{name}.png")
-            print(f"{name}.png  {pw}x{ph}  (from {ARMS_BOARD.name})")
-    finally:
-        BG = saved
+def emit(img: Image.Image, name: str, scale: float) -> None:
+    w = max(1, round(img.width * scale))
+    h = max(1, round(img.height * scale))
+    img.resize((w, h), Image.NEAREST).save(OUT_DIR / f"{name}.png")
+    print(f"{name}.png  {w}x{h}")
 
 
 def main() -> None:
     board = Image.open(BOARD).convert("RGB")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    for base_name, base_box, extras in (
-        ("human-base", HUMAN_BASE_BOX, COMPONENTS),
-        ("infected-base", INFECTED_BASE_BOX, INFECTED_COMPONENTS),
-    ):
-        base = cut(board, base_box)
-        scale = TARGET_HEIGHT / base.height
-        cw = max(1, round(base.width * scale))
-        base = base.resize((cw, TARGET_HEIGHT), Image.NEAREST)
-        base.save(OUT_DIR / f"{base_name}.png")
-        print(f"{base_name}.png  {base.size}")
+    human = cut(board, HUMAN_BASE_BOX)
+    # The one scale every human-side piece shares, so a rifle stays rifle-sized
+    # against the body it is held by.
+    scale = TARGET_HEIGHT / human.height
+    emit(human, "human-base", scale)
 
-        # Every layer lands on this same canvas, so the game can seat them all
-        # with one originY — the contract characterLayers.ts depends on.
-        for name, (box, key) in extras.items():
-            part = cut(board, box)
-            # One shared scale only — the per-part fitting scale lives in the
-            # manifest, where it can be adjusted without re-cutting anything.
-            pw = max(1, round(part.width * scale))
-            ph = max(1, round(part.height * scale))
-            part = part.resize((pw, ph), Image.NEAREST)
+    infected = cut(board, INFECTED_BASE_BOX)
+    # Solved separately: this figure is drawn shorter than the soldier (no
+    # helmet), and both have to arrive 114px tall or one of them stands in a
+    # hole. Their gear is shared, so gear keeps the human scale.
+    emit(infected, "infected-base", TARGET_HEIGHT / infected.height)
 
-            # Emitted tight-cropped, NOT pasted onto a full-figure canvas.
-            # Position and size are runtime data now (anchor/dx/dy/scale in
-            # CHARACTER_LAYERS, dragged in the gear-fitting panel), so baking
-            # them here would just freeze one guess into the PNG.
-            part.save(OUT_DIR / f"{name}.png")
-            print(f"{name}.png  {part.size}")
+    for name, box in GEAR.items():
+        emit(cut(board, box), name, scale)
 
 
 if __name__ == "__main__":
     main()
-    cut_arms()

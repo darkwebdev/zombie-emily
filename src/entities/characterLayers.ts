@@ -51,50 +51,40 @@ export interface CharacterLayer {
 
 /** The composition recipe per kind.
  *
- * Today every kind is a single layer — the same flat figure the board has
- * always produced — so the stack below creates no child sprites at all and
- * the game renders exactly as it did before. Adding modular art means adding
- * entries here; nothing else has to change. See issue #37. */
+ * The bases are **fully clothed figures**, so a stack is a body plus the two
+ * or three things actually worn on top of it — never a body being assembled
+ * out of parts. That is what tools/extract_modules.py's docstring is about:
+ * dressing a minimal-clothing body meant every layer had to seam against its
+ * neighbours, and a trouser layer that fell a few pixels short left bare
+ * shins. Here a missing layer can only mean a missing accessory.
+ *
+ * A consequence worth stating plainly: STANDARD and SHIELD wear **no head
+ * layer**, because the base is already drawn in a helmet with goggles. Only
+ * RIFLEMAN replaces the head, with the hooded jacket the board's own SNIPER
+ * example uses. See issue #37. */
 export const CHARACTER_LAYERS: Record<EnemyKind | FollowerKind, CharacterLayer[]> = {
   // Layer 0 is the body, drawn full-figure and feet-flush, so it carries no
   // anchor. Everything above it is a loose item parked on an anchor — the
-  // numbers below were dialled in with the gear-fitting panel (?debug=1) and
-  // can be re-dialled there any time without re-cutting art.
-  STANDARD: [
-    { texture: "human-base" },
-    { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
-    { texture: "arms-sleeves", anchor: "chest", dy: 6, scale: 1.5 },
-    { texture: "torso-vest", anchor: "chest", scale: 1.2 },
-    { texture: "head-helmet", anchor: "head", dy: -2, scale: 1.05 },
-    { texture: "rifle-assault", anchor: "hand", scale: 0.9 },
-  ],
+  // numbers below were dialled in with the gear-fitting panel (?debug=1, Gear
+  // tab) and can be re-dialled there any time without re-cutting art.
+  STANDARD: [{ texture: "human-base" }, { texture: "rifle-assault", anchor: "hand", scale: 0.9 }],
   RIFLEMAN: [
     { texture: "human-base" },
-    { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
-    { texture: "arms-sleeves", anchor: "chest", dy: 6, scale: 1.5 },
-    { texture: "torso-vest", anchor: "chest", scale: 1.2 },
     { texture: "head-hood", anchor: "head", dy: -2, scale: 1.05 },
     { texture: "rifle-sniper", anchor: "hand", scale: 0.9 },
   ],
+  // The pistol is what the board's SHIELD variant carries: a shield trooper
+  // with a rifle as well would read as the same silhouette as a STANDARD.
   SHIELD: [
     { texture: "human-base" },
-    { texture: "legs-pants", anchor: "hips", dy: 4, scale: 1.45 },
-    { texture: "arms-sleeves", anchor: "chest", dy: 6, scale: 1.5 },
-    { texture: "torso-vest", anchor: "chest", scale: 1.2 },
-    { texture: "head-helmet", anchor: "head", dy: -2, scale: 1.05 },
-    { texture: "shield-riot", anchor: "chest", dx: -9, scale: 1.2 },
+    { texture: "shield-riot", anchor: "chest", dx: 9, scale: 1.2 },
+    { texture: "pistol", anchor: "hand", dx: -8, scale: 0.9 },
   ],
-  // Same gear silhouettes, torn, over a zombie body — which is what makes a
-  // conversion read as "that used to be a soldier". No weapon: both boards
-  // mark the infected weapon column (NONE).
-  BASE: [
-    { texture: "infected-base" },
-    { texture: "infected-legs", anchor: "hips", dy: 4, scale: 1.45 },
-    { texture: "infected-arms", anchor: "chest", dy: 6, scale: 1.5 },
-    { texture: "infected-torso-torn", anchor: "chest", scale: 1.2 },
-  ],
-  // Still one finished figure: the boards carry no brute components, and its
-  // whole job is a silhouette that shares nothing with a soldier.
+  // Its own base, not the human one re-tinted — and then a soldier's kit worn
+  // over it, which is what makes a conversion read as "that used to be a
+  // soldier". No weapon: the board marks the infected weapon column (NONE),
+  // and a follower that shoots is a different design question entirely.
+  BASE: [{ texture: "infected-base" }, { texture: "acc-grenade", anchor: "hips", dx: 5, dy: -1 }],
   BRUTE: [{ texture: "follower-brute" }],
 };
 
