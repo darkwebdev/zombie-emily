@@ -11,8 +11,10 @@ There are two kinds of source art in art/, and a path for each:
    the boxes below were found by that scan and are pinned here so the output
    is reproducible. See ROWS / build_row.
 2. Per-animation sheets authored later as a proper uniform grid on a
-   transparent background (art/emily-walk-sheet.png) — no scanning, no
-   background removal, just a cell crop. See GRID_SHEETS / build_grid.
+   transparent background (art/emily-walk-sheet.png, art/emily-idle-sheet.png)
+   — no scanning, no background removal, just a cell crop. See GRID_SHEETS /
+   build_grid. Walk and idle both arrive this way now; only throw still comes
+   off the board.
 
 A grid sheet wins over a same-named row on the board, so re-authoring one
 animation is a matter of dropping its sheet in art/ and adding an entry.
@@ -53,6 +55,11 @@ OUT_BOTTOM_PAD = 2 * ART_SCALE
 # top-to-bottom. Trailing cells past `frames` are blank padding.
 GRID_SHEETS = {
     "walk": {"file": "emily-walk-sheet.png", "cell": 256, "cols": 5, "frames": 11},
+    # 4x3 cells with the last two blank. Drawn in profile like the walk sheet,
+    # which is the point of re-authoring it: the board's idle poses face the
+    # camera, so she used to swing side-on the instant she started walking and
+    # snap back to front-on when she stopped.
+    "idle": {"file": "emily-idle-sheet.png", "cell": 256, "cols": 4, "frames": 10},
 }
 
 # The grid path targets the same on-screen size and footing as the frames cut
@@ -74,9 +81,11 @@ ROWS = {
     # leg is drawn so dark in the source that it reads as a black blob once
     # separated from the board.
     "throw": (372, 483, [(568, 623), (801, 862), (1015, 1083), (1409, 1468)]),
-    # The "arm returns" row poses are front-facing standing frames — they make
-    # a better idle than any mid-stride walk frame.
-    "idle": (542, 639, [(569, 623), (686, 741), (797, 853), (1133, 1189), (1245, 1299)]),
+    # "idle" is deliberately absent too, and for a stronger reason than walk:
+    # the board's idle poses (the "arm returns" row, at
+    # (542, 639, [(569, 623), (686, 741), (797, 853), (1133, 1189), (1245, 1299)]))
+    # are drawn facing the camera, while every locomotion frame is in profile.
+    # The grid sheet above replaces them with a profile idle.
 }
 
 # The thrown arm, from the ATTACK row. Not a character frame — its own texture.
